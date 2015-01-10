@@ -1,0 +1,5 @@
+[package]
+
+name = "libforestdb-sys"
+version = "0.0.1"
+authors = ["Valerii Hiora <valerii.hiora@gmail.com>"]

@@ -1,0 +1,8 @@
+[package]
+
+name = "sherwood"
+version = "0.0.1"
+authors = ["Valerii Hiora <valerii.hiora@gmail.com>"]
+
+[dependencies.libforestdb-sys]
+path = "libforestdb-sys"
