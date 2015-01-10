@@ -1,8 +1,14 @@
 [package]
-
 name = "sherwood"
 version = "0.0.1"
 authors = ["Valerii Hiora <valerii.hiora@gmail.com>"]
+license = "MIT"
+description = "ForestDB bindings"
+repository = "https://github.com/vhbit/sherwood"
+keywords = ["db", "database", "key-value", "forestdb", "kvs"]
 
 [dependencies.libforestdb-sys]
 path = "libforestdb-sys"
+
+[dependencies]
+log = "0.1"
