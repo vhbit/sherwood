@@ -1,5 +1,6 @@
 #![allow(unstable)]
 
+extern crate libc;
 extern crate "libforestdb-sys" as ffi;
 
 #[macro_use] extern crate log;
@@ -74,14 +75,18 @@ impl Default for Config {
     }
 }
 
+/// Initializes ForestDB. Usually is called automatically
 pub fn init(config: Config) -> Result<(), Error> {
     lift_error!(unsafe {ffi::fdb_init(mem::transmute(&config.raw))})
 }
 
+/// Forces ForestDB shutdown: closing everything and terminating
+/// compactor thread
 pub fn shutdown() -> Result<(), Error> {
     lift_error!(unsafe {ffi::fdb_shutdown()})
 }
 
+/// Represents ForestDB file handle
 pub struct FileHandle {
     path: Path,
     config: Config,
@@ -97,6 +102,7 @@ impl FileHandle {
         }
     }
 
+    /// Opens database with specified config
     pub fn open(path: &Path, config: Config) -> FdbResult<FileHandle> {
         let mut handle: *mut ffi::fdb_file_handle = ptr::null_mut();
         let c_path = CString::from_slice(path.as_vec());
@@ -108,10 +114,12 @@ impl FileHandle {
         Ok(res)
     }
 
+    /// Retrieves default store
     pub fn get_default_store(&self, config: StoreConfig) -> FdbResult<Store> {
         self._get_store(None, config)
     }
 
+    /// Retrieves store by name
     pub fn get_store(&self, name: &str, config: StoreConfig) -> FdbResult<Store> {
         let c_name = CString::from_slice(name.as_bytes());
         self._get_store(Some(c_name), config)
@@ -168,6 +176,8 @@ impl Default for StoreConfig {
     }
 }
 
+
+/// Represents ForestDB key value store
 pub struct Store {
     raw: *mut ffi::fdb_kvs_handle,
     config: StoreConfig
@@ -180,11 +190,71 @@ impl Store {
             config: config
         }
     }
+
+    /// Retrieves a value by key (plain KV mode)
+    pub fn set_value(&self, key: &[u8], value: &[u8]) -> FdbResult<()> {
+        lift_error!(unsafe {
+            let mut doc = UnsafeDoc::with_key_value(key, value);
+            ffi::fdb_set(self.raw, &mut doc.raw)
+        })
+    }
+
+    /// Sets a value for key (plain KV mode)
+    pub fn get_value(&self, key: &[u8]) -> FdbResult<Vec<u8>> {
+        let mut doc = UnsafeDoc::with_key(key);
+        try_fdb!(unsafe {
+            ffi::fdb_get(self.raw, &mut doc.raw)
+        });
+        Ok(unsafe {
+            Vec::from_raw_buf(mem::transmute(doc.raw.body), doc.raw.bodylen as usize)
+        })
+    }
 }
 
 impl Drop for Store {
     fn drop(&mut self) {
         unsafe {ffi::fdb_kvs_close(self.raw); }
+    }
+}
+
+pub struct UnsafeDoc<'a> {
+    raw: ffi::fdb_doc,
+}
+
+impl<'a> UnsafeDoc<'a> {
+    fn with_key(key: &'a [u8]) -> UnsafeDoc<'a> {
+        UnsafeDoc {
+            raw: ffi::fdb_doc {
+                key: unsafe { mem::transmute(key.as_ptr()) },
+                keylen: key.len() as libc::size_t,
+                body: ptr::null_mut(),
+                bodylen: 0,
+                meta: ptr::null_mut(),
+                metalen: 0,
+                size_ondisk: 0,
+                seqnum: 0,
+                offset: 0,
+                deleted: 0
+            }
+        }
+    }
+
+    fn with_key_value(key: &'a [u8], value: &'a [u8]) -> UnsafeDoc<'a> {
+        UnsafeDoc {
+            raw: ffi::fdb_doc {
+                key: unsafe { mem::transmute(key.as_ptr()) },
+                keylen: key.len() as libc::size_t,
+                body: unsafe { mem::transmute(value.as_ptr()) },
+                bodylen: value.len() as libc::size_t,
+                meta: ptr::null_mut(),
+                metalen: 0,
+                size_ondisk: 0,
+                seqnum: 0,
+                offset: 0,
+                deleted: 0
+
+            }
+        }
     }
 }
 
@@ -231,5 +301,15 @@ mod tests {
         let db = FileHandle::open(&Path::new("test3"), Default::default()).unwrap();
         assert!(db.get_default_store(Default::default()).is_ok());
         assert!(db.get_store("hello", Default::default()).is_ok())
+    }
+
+    #[test]
+    fn test_simple_keys() {
+        let db = FileHandle::open(&Path::new("test4"), Default::default()).unwrap();
+        let store = db.get_default_store(Default::default()).unwrap();
+        assert!(store.get_value("hello".as_bytes()).is_err());
+        assert!(store.set_value("hello".as_bytes(), "world".as_bytes()).is_ok());
+        let value = store.get_value("hello".as_bytes()).unwrap();
+        assert_eq!(value.as_slice(), "world".as_bytes());
     }
 }
