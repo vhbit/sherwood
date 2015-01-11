@@ -176,7 +176,6 @@ impl Default for StoreConfig {
     }
 }
 
-
 /// Represents ForestDB key value store
 pub struct Store {
     raw: *mut ffi::fdb_kvs_handle,
@@ -192,21 +191,27 @@ impl Store {
     }
 
     /// Retrieves a value by key (plain KV mode)
-    pub fn set_value(&self, key: &[u8], value: &[u8]) -> FdbResult<()> {
+    pub fn set_value<K, V>(&self, key: &K, value: &V) -> FdbResult<()>
+        where K: AsSlice<u8>,
+              V: AsSlice<u8>
+    {
+        let mut doc = try!(Doc::new(key));
+        try!(doc.set_body(value));
+
         lift_error!(unsafe {
-            let mut doc = UnsafeDoc::with_key_value(key, value);
-            ffi::fdb_set(self.raw, &mut doc.raw)
+            ffi::fdb_set(self.raw, doc.raw)
         })
     }
 
     /// Sets a value for key (plain KV mode)
-    pub fn get_value(&self, key: &[u8]) -> FdbResult<Vec<u8>> {
-        let mut doc = UnsafeDoc::with_key(key);
+    pub fn get_value<K>(&self, key: &K) -> FdbResult<Vec<u8>> where K: AsSlice<u8> {
+        let mut doc = try!(Doc::new(key));
         try_fdb!(unsafe {
-            ffi::fdb_get(self.raw, &mut doc.raw)
+            ffi::fdb_get(self.raw, doc.raw)
         });
         Ok(unsafe {
-            Vec::from_raw_buf(mem::transmute(doc.raw.body), doc.raw.bodylen as usize)
+            Vec::from_raw_buf(mem::transmute((*doc.raw).body),
+                              (*doc.raw).bodylen as usize)
         })
     }
 }
@@ -217,8 +222,61 @@ impl Drop for Store {
     }
 }
 
+pub struct Doc {
+    raw: *mut ffi::fdb_doc
+}
+
+impl Doc {
+    pub fn new<K>(key: &K) -> FdbResult<Doc> where K: AsSlice<u8>{
+        let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
+        let key = key.as_slice();
+        try_fdb!(unsafe {ffi::fdb_doc_create(&mut handle,
+                                             mem::transmute(key.as_ptr()), key.len() as u64,
+                                             ptr::null(), 0,
+                                             ptr::null(), 0)});
+        Ok(Doc {raw: handle})
+    }
+
+    pub fn set_body<B>(&mut self, body: &B) -> FdbResult<()> where B: AsSlice<u8> {
+        let body = body.as_slice();
+        lift_error!(unsafe {ffi::fdb_doc_update(&mut self.raw,
+                                                ptr::null(), 0,
+                                                mem::transmute(body.as_ptr()), body.len() as u64)
+        })
+    }
+
+    pub fn set_meta<M>(&mut self, meta: &M) -> FdbResult<()> where M: AsSlice<u8> {
+        let meta = meta.as_slice();
+        lift_error!(unsafe {ffi::fdb_doc_update(&mut self.raw,
+                                                mem::transmute(meta.as_ptr()), meta.len() as u64,
+                                                ptr::null(), 0)
+        })
+    }
+}
+
+impl Drop for Doc {
+    fn drop(&mut self) {
+        unsafe {ffi::fdb_doc_free(self.raw)};
+    }
+}
+
 pub struct UnsafeDoc<'a> {
     raw: ffi::fdb_doc,
+}
+
+fn empty_doc() -> ffi::fdb_doc {
+    ffi::fdb_doc {
+        key: ptr::null_mut(),
+        keylen: 0,
+        body: ptr::null_mut(),
+        bodylen: 0,
+        meta: ptr::null_mut(),
+        metalen: 0,
+        size_ondisk: 0,
+        seqnum: 0,
+        offset: 0,
+        deleted: 0
+    }
 }
 
 impl<'a> UnsafeDoc<'a> {
@@ -227,14 +285,7 @@ impl<'a> UnsafeDoc<'a> {
             raw: ffi::fdb_doc {
                 key: unsafe { mem::transmute(key.as_ptr()) },
                 keylen: key.len() as libc::size_t,
-                body: ptr::null_mut(),
-                bodylen: 0,
-                meta: ptr::null_mut(),
-                metalen: 0,
-                size_ondisk: 0,
-                seqnum: 0,
-                offset: 0,
-                deleted: 0
+                .. empty_doc()
             }
         }
     }
@@ -246,13 +297,7 @@ impl<'a> UnsafeDoc<'a> {
                 keylen: key.len() as libc::size_t,
                 body: unsafe { mem::transmute(value.as_ptr()) },
                 bodylen: value.len() as libc::size_t,
-                meta: ptr::null_mut(),
-                metalen: 0,
-                size_ondisk: 0,
-                seqnum: 0,
-                offset: 0,
-                deleted: 0
-
+                .. empty_doc()
             }
         }
     }
@@ -307,9 +352,9 @@ mod tests {
     fn test_simple_keys() {
         let db = FileHandle::open(&Path::new("test4"), Default::default()).unwrap();
         let store = db.get_default_store(Default::default()).unwrap();
-        assert!(store.get_value("hello".as_bytes()).is_err());
-        assert!(store.set_value("hello".as_bytes(), "world".as_bytes()).is_ok());
-        let value = store.get_value("hello".as_bytes()).unwrap();
+        assert!(store.get_value(&"hello".as_bytes()).is_err());
+        assert!(store.set_value(&"hello".as_bytes(), &"world".as_bytes()).is_ok());
+        let value = store.get_value(&"hello".as_bytes()).unwrap();
         assert_eq!(value.as_slice(), "world".as_bytes());
     }
 }
