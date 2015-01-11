@@ -2,6 +2,8 @@
 
 extern crate "libforestdb-sys" as ffi;
 
+#[macro_use] extern crate log;
+
 use std::default::Default;
 use std::error;
 use std::ffi::{CString, c_str_to_bytes};
@@ -23,6 +25,12 @@ impl error::Error for Error {
 
     fn detail(&self) -> Option<String> {
         unsafe { String::from_utf8(c_str_to_bytes(&ffi::fdb_error_msg(self.code)).to_vec()).ok() }
+    }
+}
+
+impl std::fmt::Show for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(&format!("fdb error: {:?}", (self as &error::Error).detail())[])
     }
 }
 
@@ -67,13 +75,23 @@ pub fn init(config: Config) -> Result<(), Error> {
     lift_error!(unsafe {ffi::fdb_init(mem::transmute(&config.raw))})
 }
 
+pub fn shutdown() -> Result<(), Error> {
+    lift_error!(unsafe {ffi::fdb_shutdown()})
+}
+
 pub struct FileHandle {
-    raw: *mut ffi::fdb_file_handle
+    path: Path,
+    config: Config,
+    raw: *mut ffi::fdb_file_handle,
 }
 
 impl FileHandle {
-    fn from_raw(handle: *mut ffi::fdb_file_handle) -> FileHandle {
-        FileHandle { raw: handle }
+    fn from_raw(handle: *mut ffi::fdb_file_handle, path: &Path, config: Config) -> FileHandle {
+        FileHandle {
+            raw: handle,
+            path: path.clone(),
+            config: config
+        }
     }
 
     pub fn open(path: &Path, config: Config) -> Result<FileHandle, Error> {
@@ -83,13 +101,29 @@ impl FileHandle {
         try_fdb!(unsafe { ffi::fdb_open(mem::transmute(&mut handle),
                                         c_path.as_ptr(),
                                         mem::transmute(&config.raw)) });
-        Ok(FileHandle::from_raw(handle))
+        let res = FileHandle::from_raw(handle, path, config);
+        Ok(res)
+    }
+}
+
+unsafe impl Send for FileHandle {}
+
+
+// FIXME: do not use trait, implement clone as method
+// which returns result? Otherwise it is impossible
+// to handle cloning right
+impl Clone for FileHandle {
+    fn clone(&self) -> FileHandle {
+        match FileHandle::open(&self.path, self.config) {
+            Ok(res) => res,
+            Err(_) => panic!("failed to clone")
+        }
     }
 }
 
 impl Drop for FileHandle {
     fn drop(&mut self) {
-        println!("Dropping");
+        debug!("Dropping");
         unsafe { ffi::fdb_close(self.raw); }
     }
 }
@@ -100,6 +134,7 @@ mod tests {
 
     use std::default::Default;
     use std::error;
+    use std::thread::Thread;
 
     use ffi;
 
@@ -118,5 +153,16 @@ mod tests {
     fn test_open_file() {
         assert!(super::init(Default::default()).is_ok());
         assert!(FileHandle::open(&Path::new("test1"), Default::default()).is_ok());
+    }
+
+    #[test]
+    fn test_clone() {
+        let fh1 = FileHandle::open(&Path::new("test2"), Default::default()).unwrap();
+        let fh2 = fh1.clone();
+
+        Thread::scoped(move || {
+            let fh_cloned = fh2;
+            // FIXME: test something useful
+        }).join();
     }
 }
