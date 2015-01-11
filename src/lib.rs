@@ -8,6 +8,7 @@ use std::default::Default;
 use std::error;
 use std::ffi::{CString, c_str_to_bytes};
 use std::mem;
+use std::ptr;
 
 #[derive(Copy)]
 pub struct Error {code: i32}
@@ -33,6 +34,8 @@ impl std::fmt::Show for Error {
         f.write_str(&format!("fdb error: {:?}", (self as &error::Error).detail())[])
     }
 }
+
+pub type FdbResult<T> = Result<T, Error>;
 
 macro_rules! lift_error {
     ($e: expr) => (lift_error!($e, ()));
@@ -94,8 +97,8 @@ impl FileHandle {
         }
     }
 
-    pub fn open(path: &Path, config: Config) -> Result<FileHandle, Error> {
-        let mut handle: *mut ffi::fdb_file_handle = unsafe { mem::zeroed() };
+    pub fn open(path: &Path, config: Config) -> FdbResult<FileHandle> {
+        let mut handle: *mut ffi::fdb_file_handle = ptr::null_mut();
         let c_path = CString::from_slice(path.as_vec());
 
         try_fdb!(unsafe { ffi::fdb_open(mem::transmute(&mut handle),
@@ -125,6 +128,12 @@ impl Drop for FileHandle {
     fn drop(&mut self) {
         debug!("Dropping");
         unsafe { ffi::fdb_close(self.raw); }
+    }
+}
+
+impl std::fmt::Show for FileHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(&format!("FdbFileHandle {{path: {:?}}}", self.path)[])
     }
 }
 
