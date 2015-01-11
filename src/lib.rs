@@ -107,10 +107,28 @@ impl FileHandle {
         let res = FileHandle::from_raw(handle, path, config);
         Ok(res)
     }
+
+    pub fn get_default_store(&self, config: StoreConfig) -> FdbResult<Store> {
+        self._get_store(None, config)
+    }
+
+    pub fn get_store(&self, name: &str, config: StoreConfig) -> FdbResult<Store> {
+        let c_name = CString::from_slice(name.as_bytes());
+        self._get_store(Some(c_name), config)
+    }
+
+    fn _get_store(&self, name: Option<CString>, config: StoreConfig) -> FdbResult<Store> {
+        let mut handle: *mut ffi::fdb_kvs_handle = ptr::null_mut();
+        try_fdb!(unsafe { ffi::fdb_kvs_open(self.raw,
+                                            mem::transmute(&mut handle),
+                                            if name.is_some() {name.unwrap().as_ptr()} else {ptr::null()},
+                                            mem::transmute(&config.raw)
+                                            )});
+        Ok(Store::from_raw(handle, config))
+    }
 }
 
 unsafe impl Send for FileHandle {}
-
 
 // FIXME: do not use trait, implement clone as method
 // which returns result? Otherwise it is impossible
@@ -134,6 +152,39 @@ impl Drop for FileHandle {
 impl std::fmt::Show for FileHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.write_str(&format!("FdbFileHandle {{path: {:?}}}", self.path)[])
+    }
+}
+
+#[derive(Copy)]
+pub struct StoreConfig {
+    raw: ffi::fdb_kvs_config
+}
+
+impl Default for StoreConfig {
+    fn default() -> StoreConfig {
+        StoreConfig {
+            raw: unsafe {ffi::fdb_get_default_kvs_config()}
+        }
+    }
+}
+
+pub struct Store {
+    raw: *mut ffi::fdb_kvs_handle,
+    config: StoreConfig
+}
+
+impl Store {
+    fn from_raw(raw: *mut ffi::fdb_kvs_handle, config: StoreConfig) -> Store {
+        Store {
+            raw: raw,
+            config: config
+        }
+    }
+}
+
+impl Drop for Store {
+    fn drop(&mut self) {
+        unsafe {ffi::fdb_kvs_close(self.raw); }
     }
 }
 
@@ -173,5 +224,12 @@ mod tests {
             let fh_cloned = fh2;
             // FIXME: test something useful
         }).join();
+    }
+
+    #[test]
+    fn test_open_store() {
+        let db = FileHandle::open(&Path::new("test3"), Default::default()).unwrap();
+        assert!(db.get_default_store(Default::default()).is_ok());
+        assert!(db.get_store("hello", Default::default()).is_ok())
     }
 }
