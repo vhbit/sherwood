@@ -32,7 +32,10 @@ fn main() {
         .arg(format!("-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={}", lib_dir.display()))
         .arg("-DSNAPPY_OPTION=Disable"));
 
-    run(&mut Command::new("make"));
+    run(Command::new("make")
+        .arg("forestdb")
+        .arg("-j")
+        .arg("2")); // -j 2 is probably minimum
 
     let _ = os::change_dir(&cwd);
 
