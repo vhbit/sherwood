@@ -360,11 +360,33 @@ impl<'a> UnsafeDoc<'a> {
 mod tests {
     use super::{FileHandle, Error};
 
+    use std::sync::atomic::{AtomicUint, ATOMIC_UINT_INIT, Ordering};
     use std::default::Default;
     use std::error;
+    use std::io::{self, USER_DIR};
+    use std::io::fs::PathExtensions;
+    use std::os;
+    use std::sync::{Once, ONCE_INIT};
     use std::thread::Thread;
 
     use ffi;
+
+    fn next_db_path() -> Path {
+        static NEXT_TEST: AtomicUint = ATOMIC_UINT_INIT;
+        static CLEAR_DIR_ONCE: Once = ONCE_INIT;
+        let cur_test = NEXT_TEST.fetch_add(1, Ordering::SeqCst);
+        let db_dir = os::self_exe_path().unwrap().join("db_tests");
+
+        CLEAR_DIR_ONCE.call_once(|| {
+            if db_dir.exists() {
+                assert!(io::fs::rmdir_recursive(&db_dir).is_ok());
+            }
+
+            assert!(io::fs::mkdir(&db_dir, USER_DIR).is_ok());
+        });
+
+        db_dir.join(format!("db-{}", cur_test))
+    }
 
     #[test]
     fn test_error_msg(){
@@ -380,12 +402,12 @@ mod tests {
     #[test]
     fn test_open_file() {
         assert!(super::init(Default::default()).is_ok());
-        assert!(FileHandle::open(&Path::new("test1"), Default::default()).is_ok());
+        assert!(FileHandle::open(&next_db_path(), Default::default()).is_ok());
     }
 
     #[test]
     fn test_clone() {
-        let fh1 = FileHandle::open(&Path::new("test2"), Default::default()).unwrap();
+        let fh1 = FileHandle::open(&next_db_path(), Default::default()).unwrap();
         let fh2 = fh1.clone();
 
         Thread::scoped(move || {
@@ -396,14 +418,14 @@ mod tests {
 
     #[test]
     fn test_open_store() {
-        let db = FileHandle::open(&Path::new("test3"), Default::default()).unwrap();
+        let db = FileHandle::open(&next_db_path(), Default::default()).unwrap();
         assert!(db.get_default_store(Default::default()).is_ok());
         assert!(db.get_store("hello", Default::default()).is_ok())
     }
 
     #[test]
     fn test_simple_keys() {
-        let db = FileHandle::open(&Path::new("test4"), Default::default()).unwrap();
+        let db = FileHandle::open(&next_db_path(), Default::default()).unwrap();
         let store = db.get_default_store(Default::default()).unwrap();
         assert!(store.get_value(&"hello".as_bytes()).is_err());
         assert!(store.set_value(&"hello".as_bytes(), &"world".as_bytes()).is_ok());
