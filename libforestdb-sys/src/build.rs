@@ -14,8 +14,6 @@ fn run(cmd: &mut Command) {
 }
 
 fn main() {
-    let cwd = os::getcwd().unwrap();
-
     let root_dir = Path::new(os::getenv("CARGO_MANIFEST_DIR").unwrap());
     let out_dir = Path::new(os::getenv("OUT_DIR").expect("out dir must be specified"));
 
@@ -26,18 +24,23 @@ fn main() {
     let lib_dir = out_dir.join("lib");
     assert!(fs::mkdir_recursive(&lib_dir, io::USER_DIR).is_ok());
 
+    let profile = match os::getenv("PROFILE").unwrap().as_slice() {
+        "bench" | "release" => "Release",
+        // FIXME: it should be Debug, but might fail as debug requires gcov/lcov to be installed
+        _ => "RelWithDebugInfo",
+    };
+
     run(Command::new("cmake")
         .arg(root_dir.join("forestdb"))
-        .arg("-DCMAKE_BUILD_TYPE=Release") // FIXME: use env for determine type
+        .arg(format!("-DCMAKE_BUILD_TYPE={}", profile))
         .arg(format!("-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={}", lib_dir.display()))
-        .arg("-DSNAPPY_OPTION=Disable"));
+        .arg("-DSNAPPY_OPTION=Disable")
+        .cwd(&build_dir));
 
-    run(Command::new("make")
-        .arg("forestdb")
-        .arg("-j")
-        .arg("2")); // -j 2 is probably minimum
-
-    let _ = os::change_dir(&cwd);
+    run(Command::new("cmake")
+        .arg("--build").arg(".")
+        .arg("--target").arg("forestdb")
+        .cwd(&build_dir));
 
     println!("cargo:rustc-flags=-l forestdb -L {}", lib_dir.display());
 }
