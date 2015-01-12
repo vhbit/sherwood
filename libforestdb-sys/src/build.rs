@@ -29,7 +29,8 @@ fn main() {
     run(Command::new("cmake")
         .arg(root_dir.join("forestdb"))
         .arg("-DCMAKE_BUILD_TYPE=Release") // FIXME: use env for determine type
-        .arg(format!("-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={}", lib_dir.display())));
+        .arg(format!("-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={}", lib_dir.display()))
+        .arg("-DSNAPPY_OPTION=Disable"));
 
     run(&mut Command::new("make"));
 
