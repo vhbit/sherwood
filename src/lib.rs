@@ -59,6 +59,26 @@ macro_rules! try_fdb {
     })
 }
 
+#[repr(u8)]
+#[derive(Copy)]
+pub enum CommitOptions {
+    Normal = ffi::FDB_COMMIT_NORMAL as u8,
+    ManualWalFlush = ffi::FDB_COMMIT_MANUAL_WAL_FLUSH as u8
+}
+
+#[repr(u8)]
+#[derive(Copy)]
+/// Transaction isolation level
+pub enum IsolationLevel {
+    // Serializable = 0, // unsupported yet
+    // RepeatableRead = 1, // unsupported yet
+    /// Prevent a transaction from reading uncommitted data from other
+    /// transactions.
+    ReadCommitted = 2,
+    ///  Allow a transaction to see uncommitted data from other transaction.
+    ReadUncommited = 3,
+}
+
 #[derive(Copy)]
 pub struct Config {
     raw: ffi::fdb_config
@@ -133,6 +153,38 @@ impl FileHandle {
                                             mem::transmute(&config.raw)
                                             )});
         Ok(Store::from_raw(handle, config))
+    }
+
+    /// Commit all pending doc changes
+    pub fn commit(&self, options: CommitOptions) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_commit(self.raw, options as u8)})
+    }
+
+    /// Writes compacted database to new_path. If it is set to None - it'll be in-place
+    /// compaction
+    pub fn compact(&self, new_path: Option<Path>) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_compact(self.raw,
+                                             if new_path.is_none() {
+                                                 ptr::null_mut()
+                                             } else {
+                                                 CString::from_slice(new_path.unwrap().as_vec()).as_ptr()
+                                             })})
+    }
+
+    pub fn estimate_size(&self) -> u64 {
+        unsafe {ffi::fdb_estimate_space_used(self.raw) as u64}
+    }
+
+    pub fn begin_transaction(&self, isolation: IsolationLevel) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_begin_transaction(self.raw, isolation as u8)})
+    }
+
+    pub fn end_transaction(&self, options: CommitOptions) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_end_transaction(self.raw, options as u8)})
+    }
+
+    pub fn abort_transaction(&self) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_abort_transaction(self.raw)})
     }
 }
 
@@ -214,6 +266,7 @@ impl Store {
                               (*doc.raw).bodylen as usize)
         })
     }
+
 }
 
 impl Drop for Store {
