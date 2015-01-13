@@ -149,14 +149,14 @@ pub enum Struct__fdb_kvs_handle { }
 pub type fdb_kvs_handle = Struct__fdb_kvs_handle;
 pub type fdb_iterator_opt_t = u16;
 pub type Enum_Unnamed10 = ::libc::c_uint;
-pub const FDB_ITR_NONE: ::libc::c_uint = 0;
-pub const FDB_ITR_NO_DELETES: ::libc::c_uint = 2;
-pub const FDB_ITR_SKIP_MIN_KEY: ::libc::c_uint = 4;
-pub const FDB_ITR_SKIP_MAX_KEY: ::libc::c_uint = 8;
+pub const FDB_ITR_NONE: u16 = 0;
+pub const FDB_ITR_NO_DELETES: u16 = 2;
+pub const FDB_ITR_SKIP_MIN_KEY: u16 = 4;
+pub const FDB_ITR_SKIP_MAX_KEY: u16 = 8;
 pub type fdb_iterator_seek_opt_t = u8;
 pub type Enum_Unnamed11 = ::libc::c_uint;
-pub const FDB_ITR_SEEK_HIGHER: ::libc::c_uint = 0;
-pub const FDB_ITR_SEEK_LOWER: ::libc::c_uint = 1;
+pub const FDB_ITR_SEEK_HIGHER: u8 = 0;
+pub const FDB_ITR_SEEK_LOWER: u8 = 1;
 #[allow(missing_copy_implementations)]
 pub enum Struct__fdb_iterator { }
 pub type fdb_iterator = Struct__fdb_iterator;
