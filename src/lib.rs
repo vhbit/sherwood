@@ -171,18 +171,22 @@ impl FileHandle {
                                              })})
     }
 
+    /// Estimates space used by file
     pub fn estimate_size(&self) -> u64 {
         unsafe {ffi::fdb_estimate_space_used(self.raw) as u64}
     }
 
+    /// Starts a transaction with specified isolation level
     pub fn begin_transaction(&self, isolation: IsolationLevel) -> FdbResult<()> {
         lift_error!(unsafe {ffi::fdb_begin_transaction(self.raw, isolation as u8)})
     }
 
+    /// Ends current transaction with specified commit options
     pub fn end_transaction(&self, options: CommitOptions) -> FdbResult<()> {
         lift_error!(unsafe {ffi::fdb_end_transaction(self.raw, options as u8)})
     }
 
+    /// Aborts current transaction
     pub fn abort_transaction(&self) -> FdbResult<()> {
         lift_error!(unsafe {ffi::fdb_abort_transaction(self.raw)})
     }
