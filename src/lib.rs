@@ -554,11 +554,11 @@ macro_rules! uint_seq_iter_impl {
             }
 
             fn max_seq(&self) -> u64 {
-                self.end as u64
-            }
-
-            fn options(&self) -> IteratorOptions {
-                SKIP_MAX_KEY
+                // Range in Rust excludes high end
+                // so to use the same semantics we have to
+                // decrease end as SKIP_MAX_KEY skips key
+                // and has no effect on seq number
+                (self.end - 1) as u64
             }
         }
 
@@ -669,7 +669,6 @@ mod tests {
             assert!(io::fs::mkdir(&db_dir, USER_DIR).is_ok());
         });
 
-        println!("current test is {}", cur_test);
         db_dir.join(format!("db-{}", cur_test))
     }
 
@@ -751,8 +750,7 @@ mod tests {
         let iter = store.seq_iter(FullRange, false).unwrap();
         assert_eq!(iter.count(), 4);
 
-        let sub_iter = store.seq_iter(1us..4, false).unwrap();
-        // FIXME: find out failure reason
-        assert_eq!(sub_iter.count(), 3);
+        let mut sub_iter = store.seq_iter(2us..4, false).unwrap();
+        assert_eq!(sub_iter.count(), 2);
     }
 }
