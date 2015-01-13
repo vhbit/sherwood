@@ -36,6 +36,18 @@ impl std::fmt::Show for Error {
     }
 }
 
+pub trait KeyRange {
+    fn min_key<'a>(&'a self) -> Option<&'a [u8]>;
+    fn max_key<'a>(&'a self) -> Option<&'a [u8]>;
+    fn options(&self) -> IteratorOptions;
+}
+
+pub trait SeqRange {
+    fn min_seq(&self) -> u64;
+    fn max_seq(&self) -> u64;
+    fn options(&self) -> IteratorOptions;
+}
+
 pub type FdbResult<T> = Result<T, Error>;
 
 macro_rules! lift_error {
@@ -77,6 +89,29 @@ pub enum IsolationLevel {
     ReadCommitted = 2,
     ///  Allow a transaction to see uncommitted data from other transaction.
     ReadUncommited = 3,
+}
+
+bitflags!{
+    flags IteratorOptions: u16 {
+        const NONE = ffi::FDB_ITR_NONE,
+        #[doc="Skip deleted documents"]
+        const NO_DELETES = ffi::FDB_ITR_NO_DELETES,
+        #[doc="Exclude range minimum value"]
+        const SKIP_MIN_KEY = ffi::FDB_ITR_SKIP_MIN_KEY,
+        #[doc="Exclude range maximum value"]
+        const SKIP_MAX_KEY = ffi::FDB_ITR_SKIP_MAX_KEY,
+    }
+}
+
+#[repr(u8)]
+#[derive(Copy)]
+pub enum SeekOptions {
+    /// If seek key does not exist return the next sorted
+    /// key higher than it
+    Higher = ffi::FDB_ITR_SEEK_HIGHER,
+    /// If seek key does not exist return the previous sorted
+    /// key lower than it
+    Lower = ffi::FDB_ITR_SEEK_LOWER
 }
 
 #[derive(Copy)]
@@ -235,6 +270,7 @@ impl Default for StoreConfig {
 /// Represents ForestDB key value store
 pub struct Store {
     raw: *mut ffi::fdb_kvs_handle,
+    #[allow(dead_code)]
     config: StoreConfig
 }
 
@@ -261,7 +297,7 @@ impl Store {
 
     /// Sets a value for key (plain KV mode)
     pub fn get_value<K>(&self, key: &K) -> FdbResult<Vec<u8>> where K: AsSlice<u8> {
-        let mut doc = try!(Doc::new(key));
+        let doc = try!(Doc::new(key));
         try_fdb!(unsafe {
             ffi::fdb_get(self.raw, doc.raw)
         });
@@ -271,6 +307,50 @@ impl Store {
         })
     }
 
+    /// Creates a new iterator
+    pub fn key_iter<T>(&self, range: T, skip_deleted: bool) -> FdbResult<Iterator> where T: KeyRange {
+        let mut handle: *mut ffi::fdb_iterator = ptr::null_mut();
+        let mut min_key = ptr::null();
+        let mut min_key_len = 0;
+        let mut max_key = ptr::null();
+        let mut max_key_len = 0;
+
+        if let Some(key) = range.min_key() {
+            min_key = unsafe {mem::transmute(key.as_ptr())};
+            min_key_len = key.len() as u64;
+        }
+
+        if let Some(key) = range.max_key() {
+            max_key = unsafe {mem::transmute(key.as_ptr())};
+            max_key_len = key.len() as u64;
+        }
+
+        let options = if skip_deleted {NO_DELETES} else {IteratorOptions::empty()};
+
+        try_fdb!(unsafe {
+            ffi::fdb_iterator_init(self.raw, &mut handle,
+                                   min_key, min_key_len,
+                                   max_key, max_key_len,
+                                   (range.options() | options).bits())
+        });
+        Ok(Iterator::from_raw(handle))
+    }
+
+    pub fn seq_iter<T>(&self, range: T, skip_deleted: bool) -> FdbResult<Iterator> where T: SeqRange {
+        let mut handle: *mut ffi::fdb_iterator = ptr::null_mut();
+        let min_seq = range.min_seq();
+        let max_seq = range.max_seq();
+
+        let options = if skip_deleted {NO_DELETES} else {NONE};
+
+        try_fdb!(unsafe {
+            ffi::fdb_iterator_sequence_init(self.raw, &mut handle,
+                                   min_seq,
+                                   max_seq,
+                                   (range.options() | options).bits())
+        });
+        Ok(Iterator::from_raw(handle))
+    }
 }
 
 impl Drop for Store {
@@ -279,11 +359,66 @@ impl Drop for Store {
     }
 }
 
+pub struct Iterator {
+    raw: *mut ffi::fdb_iterator,
+}
+
+impl Iterator {
+    fn from_raw(raw: *mut ffi::fdb_iterator) -> Iterator {
+        Iterator { raw: raw }
+    }
+
+    pub fn to_next(&self) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_iterator_next(self.raw)})
+    }
+
+    pub fn to_prev(&self) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_iterator_prev(self.raw)})
+    }
+
+    pub fn get_doc(&self) -> FdbResult<Doc> {
+        let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
+        try_fdb!(unsafe {ffi::fdb_iterator_get(self.raw, &mut handle)});
+        Ok(Doc::from_raw(handle))
+    }
+
+    pub fn get_meta_only(&self) -> FdbResult<Doc> {
+        let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
+        try_fdb!(unsafe {ffi::fdb_iterator_get_metaonly(self.raw, &mut handle)});
+        Ok(Doc::from_raw(handle))
+    }
+
+    pub fn to_min_key(&self) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_iterator_seek_to_min(self.raw)})
+    }
+
+    pub fn to_max_key(&self) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_iterator_seek_to_max(self.raw)})
+    }
+
+    pub fn to_key<K>(&self, key: &K, options: SeekOptions) -> FdbResult<()> where K: AsSlice<u8> {
+        let key = key.as_slice();
+        lift_error!(unsafe {ffi::fdb_iterator_seek(self.raw,
+                                                   mem::transmute(key.as_ptr()), key.len() as u64,
+                                                   options as ffi::fdb_iterator_seek_opt_t)})
+    }
+}
+
+impl Drop for Iterator {
+    fn drop(&mut self) {
+        unsafe {ffi::fdb_iterator_close(self.raw)};
+    }
+}
+
 pub struct Doc {
     raw: *mut ffi::fdb_doc
 }
 
 impl Doc {
+    fn from_raw(handle: *mut ffi::fdb_doc) -> Doc {
+        Doc {raw: handle}
+    }
+
     pub fn new<K>(key: &K) -> FdbResult<Doc> where K: AsSlice<u8>{
         let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
         let key = key.as_slice();
@@ -317,10 +452,154 @@ impl Drop for Doc {
     }
 }
 
+#[allow(dead_code)]
 pub struct UnsafeDoc<'a> {
     raw: ffi::fdb_doc,
 }
 
+impl std::iter::Iterator for Iterator {
+    type Item = Doc;
+
+    fn next(&mut self) -> Option<Doc> {
+        match self.get_doc() {
+            Err(_) => return None,
+            Ok(doc) => {
+                let _ = self.to_next();
+                Some(doc)
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, None)
+    }
+}
+
+impl KeyRange for FullRange {
+    fn min_key(&self) -> Option<&[u8]> {
+        None
+    }
+
+    fn max_key(&self) -> Option<&[u8]> {
+        None
+    }
+
+    fn options(&self) -> IteratorOptions {
+        NONE
+    }
+}
+
+impl<T: AsSlice<u8>> KeyRange for std::ops::Range<T> {
+    fn min_key(&self) -> Option<&[u8]> {
+        Some(self.start.as_slice())
+    }
+
+    fn max_key(&self) -> Option<&[u8]> {
+        Some(self.end.as_slice())
+    }
+
+    fn options(&self) -> IteratorOptions {
+        SKIP_MAX_KEY
+    }
+}
+
+impl<T: AsSlice<u8>> KeyRange for std::ops::RangeFrom<T> {
+    fn min_key(&self) -> Option<&[u8]> {
+        Some(self.start.as_slice())
+    }
+
+    fn max_key(&self) -> Option<&[u8]> {
+        None
+    }
+
+    fn options(&self) -> IteratorOptions {
+        NONE
+    }
+}
+
+
+impl<T: AsSlice<u8>> KeyRange for std::ops::RangeTo<T> {
+    fn min_key(&self) -> Option<&[u8]> {
+        None
+    }
+
+    fn max_key(&self) -> Option<&[u8]> {
+        Some(self.end.as_slice())
+    }
+
+    fn options(&self) -> IteratorOptions {
+        NONE
+    }
+}
+
+impl SeqRange for FullRange {
+    fn min_seq(&self) -> u64 {
+        0
+    }
+
+    fn max_seq(&self) -> u64 {
+        0
+    }
+
+    fn options(&self) -> IteratorOptions {
+        NONE
+    }
+}
+
+macro_rules! uint_seq_iter_impl {
+    ($t:ty) => (
+        impl SeqRange for std::ops::Range<$t> {
+            fn min_seq(&self) -> u64 {
+                self.start as u64
+            }
+
+            fn max_seq(&self) -> u64 {
+                self.end as u64
+            }
+
+            fn options(&self) -> IteratorOptions {
+                SKIP_MAX_KEY
+            }
+        }
+
+        impl SeqRange for std::ops::RangeFrom<$t> {
+            fn min_seq(&self) -> u64 {
+                self.start as u64
+            }
+
+            fn max_seq(&self) -> u64 {
+                0
+            }
+
+            fn options(&self) -> IteratorOptions {
+                NONE
+            }
+        }
+
+        impl SeqRange for std::ops::RangeTo<$t> {
+            fn min_seq(&self) -> u64 {
+                0
+            }
+
+            fn max_seq(&self) -> u64 {
+                self.end as u64
+            }
+
+            fn options(&self) -> IteratorOptions {
+                NONE
+            }
+        }
+
+        )
+}
+
+uint_seq_iter_impl!(u8);
+uint_seq_iter_impl!(u16);
+uint_seq_iter_impl!(u32);
+uint_seq_iter_impl!(u64);
+uint_seq_iter_impl!(usize);
+
+#[allow(dead_code)]
 fn empty_doc() -> ffi::fdb_doc {
     ffi::fdb_doc {
         key: ptr::null_mut(),
@@ -336,6 +615,7 @@ fn empty_doc() -> ffi::fdb_doc {
     }
 }
 
+#[allow(dead_code)]
 impl<'a> UnsafeDoc<'a> {
     fn with_key(key: &'a [u8]) -> UnsafeDoc<'a> {
         UnsafeDoc {
@@ -389,6 +669,7 @@ mod tests {
             assert!(io::fs::mkdir(&db_dir, USER_DIR).is_ok());
         });
 
+        println!("current test is {}", cur_test);
         db_dir.join(format!("db-{}", cur_test))
     }
 
@@ -435,5 +716,43 @@ mod tests {
         assert!(store.set_value(&"hello".as_bytes(), &"world".as_bytes()).is_ok());
         let value = store.get_value(&"hello".as_bytes()).unwrap();
         assert_eq!(value.as_slice(), "world".as_bytes());
+    }
+
+    #[test]
+    fn test_key_iterator() {
+        let db = FileHandle::open(&next_db_path(), Default::default()).unwrap();
+        let store = db.get_default_store(Default::default()).unwrap();
+
+        assert!(store.set_value(&"a".as_bytes(), &"a".as_bytes()).is_ok());
+        assert!(store.set_value(&"b".as_bytes(), &"b".as_bytes()).is_ok());
+        assert!(store.set_value(&"c".as_bytes(), &"c".as_bytes()).is_ok());
+        assert!(store.set_value(&"d".as_bytes(), &"d".as_bytes()).is_ok());
+
+        // FIXME: check contents too
+        let iter = store.key_iter(FullRange, false).unwrap();
+        assert_eq!(iter.count(), 4);
+
+        let sub_iter = store.key_iter("b".as_bytes().."d".as_bytes(), false).unwrap();
+        assert_eq!(sub_iter.count(), 2);
+    }
+
+
+    #[test]
+    fn test_seq_iterator() {
+        let db = FileHandle::open(&next_db_path(), Default::default()).unwrap();
+        let store = db.get_default_store(Default::default()).unwrap();
+
+        assert!(store.set_value(&"a".as_bytes(), &"a".as_bytes()).is_ok());
+        assert!(store.set_value(&"b".as_bytes(), &"b".as_bytes()).is_ok());
+        assert!(store.set_value(&"c".as_bytes(), &"c".as_bytes()).is_ok());
+        assert!(store.set_value(&"d".as_bytes(), &"d".as_bytes()).is_ok());
+
+        // FIXME: check contents too
+        let iter = store.seq_iter(FullRange, false).unwrap();
+        assert_eq!(iter.count(), 4);
+
+        let sub_iter = store.seq_iter(1us..4, false).unwrap();
+        // FIXME: find out failure reason
+        assert_eq!(sub_iter.count(), 3);
     }
 }
