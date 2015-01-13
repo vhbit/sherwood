@@ -724,12 +724,6 @@ mod tests {
     }
 
     #[test]
-    fn test_init() {
-        assert!(super::init(Default::default()).is_ok());
-        // assert!(super::shutdown().is_ok());
-    }
-
-    #[test]
     fn test_open_file() {
         assert!(super::init(Default::default()).is_ok());
         assert!(FileHandle::open(&next_db_path(), Default::default()).is_ok());
@@ -737,12 +731,17 @@ mod tests {
 
     #[test]
     fn test_clone() {
-        let fh1 = FileHandle::open(&next_db_path(), Default::default()).unwrap();
-        let fh2 = fh1.clone();
+        let db1 = FileHandle::open(&next_db_path(), Default::default()).unwrap();
+        let db2 = db1.clone();
 
-        Thread::scoped(move || {
-            let fh_cloned = fh2;
-            // FIXME: test something useful
+        let store = db1.get_default_store(Default::default()).unwrap();
+        assert!(store.set_value(&"hello".as_bytes(), &"world".as_bytes()).is_ok());
+        assert!(db1.commit(super::CommitOptions::Normal).is_ok());
+
+        let _ = Thread::scoped(move || {
+            let store = db2.get_default_store(Default::default()).unwrap();
+            let value = store.get_value(&"hello".as_bytes()).unwrap();
+            assert_eq!("world".as_bytes(), value);
         }).join();
     }
 
@@ -801,7 +800,7 @@ mod tests {
 
         let start = 2us;
         let end = 4;
-        let mut sub_iter = store.seq_iter(start..end, false).unwrap();
+        let sub_iter = store.seq_iter(start..end, false).unwrap();
 
         let seq_nums: Vec<_> = sub_iter.map(|doc| doc.seq_num()).collect();
         assert_eq!(seq_nums, (start..end).map(|x| x as u64).collect::<Vec<_>>());
