@@ -10,6 +10,7 @@ use std::error;
 use std::ffi::{CString, c_str_to_bytes};
 use std::mem;
 use std::ptr;
+use std::slice::from_raw_buf;
 
 #[derive(Copy)]
 pub struct Error {code: i32}
@@ -50,6 +51,10 @@ pub trait SeqRange {
     fn options(&self) -> IteratorOptions {
         NONE
     }
+}
+
+pub trait FromBytes {
+    fn from_bytes(bytes: &[u8]) -> Option<Self>;
 }
 
 pub type FdbResult<T> = Result<T, Error>;
@@ -291,7 +296,7 @@ impl Store {
         where K: AsSlice<u8>,
               V: AsSlice<u8>
     {
-        let mut doc = try!(Doc::new(key));
+        let mut doc = try!(Doc::with_key(key));
         try!(doc.set_body(value));
 
         lift_error!(unsafe {
@@ -301,7 +306,7 @@ impl Store {
 
     /// Sets a value for key (plain KV mode)
     pub fn get_value<K>(&self, key: &K) -> FdbResult<Vec<u8>> where K: AsSlice<u8> {
-        let doc = try!(Doc::new(key));
+        let doc = try!(Doc::with_key(key));
         try_fdb!(unsafe {
             ffi::fdb_get(self.raw, doc.raw)
         });
@@ -423,14 +428,14 @@ impl Doc {
         Doc {raw: handle}
     }
 
-    pub fn new<K>(key: &K) -> FdbResult<Doc> where K: AsSlice<u8>{
+    pub fn with_key<K>(key: &K) -> FdbResult<Doc> where K: AsSlice<u8>{
         let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
         let key = key.as_slice();
         try_fdb!(unsafe {ffi::fdb_doc_create(&mut handle,
                                              mem::transmute(key.as_ptr()), key.len() as u64,
                                              ptr::null(), 0,
                                              ptr::null(), 0)});
-        Ok(Doc {raw: handle})
+        Ok(Doc::from_raw(handle))
     }
 
     pub fn set_body<B>(&mut self, body: &B) -> FdbResult<()> where B: AsSlice<u8> {
@@ -447,6 +452,54 @@ impl Doc {
                                                 mem::transmute(meta.as_ptr()), meta.len() as u64,
                                                 ptr::null(), 0)
         })
+    }
+
+    pub fn get_raw_meta<'a>(&'a self) -> Option<&'a [u8]> {
+        let meta = unsafe {(*self.raw).meta};
+        if meta == ptr::null_mut() {
+            None
+        } else {
+            unsafe {
+                Some(from_raw_buf(mem::transmute(&meta), (*self.raw).metalen as usize))
+            }
+        }
+    }
+
+    pub fn get_raw_body<'a>(&'a self) -> Option<&'a [u8]> {
+        let body = unsafe {(*self.raw).body};
+        if body == ptr::null_mut() {
+            None
+        } else {
+            unsafe {
+                Some(from_raw_buf(mem::transmute(&body), (*self.raw).bodylen as usize))
+            }
+        }
+    }
+
+    pub fn get_meta<T:FromBytes>(&self) -> Option<T> {
+        self.get_raw_meta().and_then(|x| FromBytes::from_bytes(x))
+    }
+
+    pub fn get_body<T:FromBytes>(&self) -> Option<T> {
+        self.get_raw_body().and_then(|x| FromBytes::from_bytes(x))
+    }
+
+    /// Sequence number assigned to the doc
+    #[inline(always)]
+    pub fn seq_num(&self) -> u64 {
+        unsafe { (*self.raw).seqnum }
+    }
+
+    /// Is doc deleted?
+    #[inline(always)]
+    pub fn is_deleted(&self) -> bool {
+        unsafe { (*self.raw).deleted != 0 }
+    }
+
+    /// Offset to the doc on disk
+    #[inline(always)]
+    pub fn offset(&self) -> u64 {
+        unsafe { (*self.raw).offset }
     }
 }
 
@@ -579,6 +632,18 @@ uint_seq_iter_impl!(u32);
 uint_seq_iter_impl!(u64);
 uint_seq_iter_impl!(usize);
 
+impl FromBytes for String {
+    fn from_bytes(bytes: &[u8]) -> Option<String> {
+        std::str::from_utf8(bytes).ok().map(|s| s.to_string())
+    }
+}
+
+impl FromBytes for Vec<u8> {
+    fn from_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
+        Some(bytes.to_vec())
+    }
+}
+
 #[allow(dead_code)]
 fn empty_doc() -> ffi::fdb_doc {
     ffi::fdb_doc {
@@ -661,6 +726,7 @@ mod tests {
     #[test]
     fn test_init() {
         assert!(super::init(Default::default()).is_ok());
+        // assert!(super::shutdown().is_ok());
     }
 
     #[test]
@@ -702,35 +768,42 @@ mod tests {
         let db = FileHandle::open(&next_db_path(), Default::default()).unwrap();
         let store = db.get_default_store(Default::default()).unwrap();
 
-        assert!(store.set_value(&"a".as_bytes(), &"a".as_bytes()).is_ok());
-        assert!(store.set_value(&"b".as_bytes(), &"b".as_bytes()).is_ok());
-        assert!(store.set_value(&"c".as_bytes(), &"c".as_bytes()).is_ok());
-        assert!(store.set_value(&"d".as_bytes(), &"d".as_bytes()).is_ok());
+        let keys: Vec<_> = vec!["a", "b", "c", "d", "e"].iter().map(|s| s.to_string()).collect();
+        for k in keys.iter() {
+            assert!(store.set_value(&k.as_bytes(), &k.as_bytes()).is_ok());
+        }
 
-        // FIXME: check contents too
+        assert!(db.commit(super::CommitOptions::Normal).is_ok());
+
         let iter = store.key_iter(FullRange, false).unwrap();
-        assert_eq!(iter.count(), 4);
+        let values: Vec<_> = iter.map(|doc| doc.get_body::<String>().unwrap()).collect();
+        assert_eq!(values, keys);
 
         let sub_iter = store.key_iter("b".as_bytes().."d".as_bytes(), false).unwrap();
-        assert_eq!(sub_iter.count(), 2);
+        let values: Vec<_> = sub_iter.map(|doc| doc.get_body::<String>().unwrap()).collect();
+        assert_eq!(values.as_slice(), &keys[1..3]);
     }
-
 
     #[test]
     fn test_seq_iterator() {
         let db = FileHandle::open(&next_db_path(), Default::default()).unwrap();
         let store = db.get_default_store(Default::default()).unwrap();
 
-        assert!(store.set_value(&"a".as_bytes(), &"a".as_bytes()).is_ok());
-        assert!(store.set_value(&"b".as_bytes(), &"b".as_bytes()).is_ok());
-        assert!(store.set_value(&"c".as_bytes(), &"c".as_bytes()).is_ok());
-        assert!(store.set_value(&"d".as_bytes(), &"d".as_bytes()).is_ok());
+        let keys: Vec<_> = vec!["a", "b", "c", "d", "e"];
+        for k in keys.iter() {
+            assert!(store.set_value(&k.as_bytes(), &k.as_bytes()).is_ok());
+        }
+        assert!(db.commit(super::CommitOptions::Normal).is_ok());
 
-        // FIXME: check contents too
         let iter = store.seq_iter(FullRange, false).unwrap();
-        assert_eq!(iter.count(), 4);
+        let seq_nums: Vec<_> = iter.map(|doc| doc.seq_num()).collect();
+        assert_eq!(seq_nums, (1..keys.len() + 1).map(|x| x as u64).collect::<Vec<_>>());
 
-        let mut sub_iter = store.seq_iter(2us..4, false).unwrap();
-        assert_eq!(sub_iter.count(), 2);
+        let start = 2us;
+        let end = 4;
+        let mut sub_iter = store.seq_iter(start..end, false).unwrap();
+
+        let seq_nums: Vec<_> = sub_iter.map(|doc| doc.seq_num()).collect();
+        assert_eq!(seq_nums, (start..end).map(|x| x as u64).collect::<Vec<_>>());
     }
 }
