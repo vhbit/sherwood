@@ -39,13 +39,17 @@ impl std::fmt::Show for Error {
 pub trait KeyRange {
     fn min_key<'a>(&'a self) -> Option<&'a [u8]>;
     fn max_key<'a>(&'a self) -> Option<&'a [u8]>;
-    fn options(&self) -> IteratorOptions;
+    fn options(&self) -> IteratorOptions {
+        NONE
+    }
 }
 
 pub trait SeqRange {
     fn min_seq(&self) -> u64;
     fn max_seq(&self) -> u64;
-    fn options(&self) -> IteratorOptions;
+    fn options(&self) -> IteratorOptions {
+        NONE
+    }
 }
 
 pub type FdbResult<T> = Result<T, Error>;
@@ -483,10 +487,6 @@ impl KeyRange for FullRange {
     fn max_key(&self) -> Option<&[u8]> {
         None
     }
-
-    fn options(&self) -> IteratorOptions {
-        NONE
-    }
 }
 
 impl<T: AsSlice<u8>> KeyRange for std::ops::Range<T> {
@@ -511,10 +511,6 @@ impl<T: AsSlice<u8>> KeyRange for std::ops::RangeFrom<T> {
     fn max_key(&self) -> Option<&[u8]> {
         None
     }
-
-    fn options(&self) -> IteratorOptions {
-        NONE
-    }
 }
 
 
@@ -526,10 +522,6 @@ impl<T: AsSlice<u8>> KeyRange for std::ops::RangeTo<T> {
     fn max_key(&self) -> Option<&[u8]> {
         Some(self.end.as_slice())
     }
-
-    fn options(&self) -> IteratorOptions {
-        NONE
-    }
 }
 
 impl SeqRange for FullRange {
@@ -539,10 +531,6 @@ impl SeqRange for FullRange {
 
     fn max_seq(&self) -> u64 {
         0
-    }
-
-    fn options(&self) -> IteratorOptions {
-        NONE
     }
 }
 
@@ -570,10 +558,6 @@ macro_rules! uint_seq_iter_impl {
             fn max_seq(&self) -> u64 {
                 0
             }
-
-            fn options(&self) -> IteratorOptions {
-                NONE
-            }
         }
 
         impl SeqRange for std::ops::RangeTo<$t> {
@@ -583,10 +567,6 @@ macro_rules! uint_seq_iter_impl {
 
             fn max_seq(&self) -> u64 {
                 self.end as u64
-            }
-
-            fn options(&self) -> IteratorOptions {
-                NONE
             }
         }
 
