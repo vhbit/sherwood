@@ -123,6 +123,7 @@ pub enum SeekOptions {
     Lower = ffi::FDB_ITR_SEEK_LOWER
 }
 
+
 #[derive(Copy)]
 pub struct Config {
     raw: ffi::fdb_config
@@ -360,6 +361,21 @@ impl Store {
         });
         Ok(Iterator::from_raw(handle))
     }
+
+    pub fn get_doc(&self, loc: DocLocation) -> FdbResult<Doc> {
+        loc.get_doc(self)
+    }
+
+    /*
+    pub fn set_doc(doc: Doc) -> FdbResult<()> {
+        Ok(())
+    }
+
+    pub fn del_doc<T>(doc: Doc) -> FdbResult<()> {
+        (*doc.raw).deleted = 1;
+        Ok(())
+    }
+    */
 }
 
 impl Drop for Store {
@@ -419,6 +435,88 @@ impl Drop for Iterator {
     }
 }
 
+enum LocationKind {
+    Key,
+    Offset,
+    SeqNum
+}
+
+pub struct DocLocation {
+    raw: *mut ffi::fdb_doc,
+    kind: LocationKind
+}
+
+impl DocLocation {
+    fn from_raw(handle: *mut ffi::fdb_doc, kind: LocationKind) -> DocLocation {
+        DocLocation {raw: handle, kind: kind}
+    }
+
+    pub fn with_key<K>(key: &K) -> FdbResult<DocLocation> where K: AsSlice<u8> {
+        let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
+        let key = key.as_slice();
+        try_fdb!(unsafe {ffi::fdb_doc_create(&mut handle,
+                                             mem::transmute(key.as_ptr()), key.len() as u64,
+                                             ptr::null(), 0,
+                                             ptr::null(), 0)});
+        Ok(DocLocation::from_raw(handle, LocationKind::Key))
+    }
+
+    pub fn with_offset(offset: u64) -> FdbResult<DocLocation> {
+        let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
+        unsafe {
+            try_fdb!(ffi::fdb_doc_create(&mut handle,
+                                         ptr::null(), 0,
+                                         ptr::null(), 0,
+                                         ptr::null(), 0));
+            (*handle).offset = offset;
+        }
+        Ok(DocLocation::from_raw(handle, LocationKind::Offset))
+    }
+
+    pub fn with_seq_num(seq_num: u64) -> FdbResult<DocLocation> {
+        let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
+        unsafe {
+            try_fdb!(ffi::fdb_doc_create(&mut handle,
+                                         ptr::null(), 0,
+                                         ptr::null(), 0,
+                                         ptr::null(), 0));
+            (*handle).seqnum = seq_num;
+        }
+        Ok(DocLocation::from_raw(handle, LocationKind::SeqNum))
+    }
+
+    fn get_doc(self, store: &Store) -> FdbResult<Doc> {
+        use LocationKind::*;
+
+        type GetFunc = unsafe extern fn(*mut ffi::fdb_kvs_handle, *mut ffi::fdb_doc) -> ffi::fdb_status;
+
+        let f: GetFunc = match self.kind {
+            Key => ffi::fdb_get,
+            Offset => ffi::fdb_get_byoffset,
+            SeqNum => ffi::fdb_get_byseq
+        };
+
+        try_fdb!(unsafe{f(store.raw, self.raw)});
+        Ok(self.unwrap())
+    }
+
+    fn unwrap(self) -> Doc {
+        let mut tmp = self;
+        let res = Doc::from_raw(tmp.raw);
+        tmp.raw = ptr::null_mut();
+        res
+    }
+}
+
+impl Drop for DocLocation {
+    fn drop(&mut self) {
+        if self.raw != ptr::null_mut() {
+            unsafe {ffi::fdb_doc_free(self.raw)};
+            self.raw = ptr::null_mut();
+        }
+    }
+}
+
 pub struct Doc {
     raw: *mut ffi::fdb_doc
 }
@@ -428,7 +526,7 @@ impl Doc {
         Doc {raw: handle}
     }
 
-    pub fn with_key<K>(key: &K) -> FdbResult<Doc> where K: AsSlice<u8>{
+    fn with_key<K>(key: &K) -> FdbResult<Doc> where K: AsSlice<u8>{
         let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
         let key = key.as_slice();
         try_fdb!(unsafe {ffi::fdb_doc_create(&mut handle,
@@ -687,7 +785,7 @@ impl<'a> UnsafeDoc<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FileHandle, Error};
+    use super::{FileHandle, Error, DocLocation};
 
     use std::sync::atomic::{AtomicUint, ATOMIC_UINT_INIT, Ordering};
     use std::default::Default;
@@ -714,6 +812,7 @@ mod tests {
             assert!(io::fs::mkdir(&db_dir, USER_DIR).is_ok());
         });
 
+        println!("db is {}", cur_test);
         db_dir.join(format!("db-{}", cur_test))
     }
 
@@ -804,5 +903,37 @@ mod tests {
 
         let seq_nums: Vec<_> = sub_iter.map(|doc| doc.seq_num()).collect();
         assert_eq!(seq_nums, (start..end).map(|x| x as u64).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_doc_locator() {
+        let db = FileHandle::open(&next_db_path(), Default::default()).unwrap();
+        let store = db.get_default_store(Default::default()).unwrap();
+
+        let keys: Vec<_> = vec!["a", "b", "c", "d", "e"];
+        for k in keys.iter() {
+            assert!(store.set_value(&k.as_bytes(), &k.as_bytes()).is_ok());
+        }
+        assert!(db.commit(super::CommitOptions::Normal).is_ok());
+
+        let doc1 = store.get_doc(DocLocation::with_key(&"a".as_bytes()).unwrap()).unwrap();
+        println!("doc1 {} {}", doc1.offset(), doc1.seq_num());
+
+        println!("by seq");
+        let doc2 = store.get_doc(DocLocation::with_seq_num(doc1.seq_num()).unwrap()).unwrap();
+        println!("by offset");
+        let doc3 = store.get_doc(DocLocation::with_offset(doc1.offset()).unwrap()).unwrap();
+        let v1: String = doc1.get_body().unwrap();
+        let v2: String = doc2.get_body().unwrap();
+        let v3: String = doc3.get_body().unwrap();
+
+        assert_eq!(v1, v2);
+        assert_eq!(v2, v3);
+
+        assert_eq!(doc1.seq_num(), doc2.seq_num());
+        assert_eq!(doc2.seq_num(), doc3.seq_num());
+
+        assert_eq!(doc1.offset(), doc2.offset());
+        assert_eq!(doc2.offset(), doc3.offset());
     }
 }
