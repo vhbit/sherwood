@@ -469,6 +469,8 @@ impl DocLocation {
                                          ptr::null(), 0,
                                          ptr::null(), 0));
             (*handle).offset = offset;
+            // FIXME: remove once https://issues.couchbase.com/browse/MB-13095 is fixed
+            (*handle).seqnum = 0xffffffffffffffff;
         }
         Ok(DocLocation::from_raw(handle, LocationKind::Offset))
     }
@@ -917,11 +919,7 @@ mod tests {
         assert!(db.commit(super::CommitOptions::Normal).is_ok());
 
         let doc1 = store.get_doc(DocLocation::with_key(&"a".as_bytes()).unwrap()).unwrap();
-        println!("doc1 {} {}", doc1.offset(), doc1.seq_num());
-
-        println!("by seq");
         let doc2 = store.get_doc(DocLocation::with_seq_num(doc1.seq_num()).unwrap()).unwrap();
-        println!("by offset");
         let doc3 = store.get_doc(DocLocation::with_offset(doc1.offset()).unwrap()).unwrap();
         let v1: String = doc1.get_body().unwrap();
         let v2: String = doc2.get_body().unwrap();
