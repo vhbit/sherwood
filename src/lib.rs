@@ -362,20 +362,68 @@ impl Store {
         Ok(Iterator::from_raw(handle))
     }
 
-    pub fn get_doc(&self, loc: DocLocation) -> FdbResult<Doc> {
-        loc.get_doc(self)
+    pub fn get_doc<'l>(&self, loc: Location<'l>) -> FdbResult<Doc> {
+        use Location::*;
+
+        let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
+        let mut key_ptr = ptr::null();
+        let mut key_len = 0;
+
+        if let Key(key) = loc {
+            key_ptr = key.as_ptr();
+            key_len = key.len();
+        }
+
+        try_fdb!(unsafe {ffi::fdb_doc_create(&mut handle,
+                                             mem::transmute(key_ptr), key_len as u64,
+                                             ptr::null(), 0,
+                                             ptr::null(), 0)});
+
+        unsafe {
+            match loc {
+                Offset(offset) => {
+                    (*handle).offset = offset;
+                    // FIXME: remove once https://issues.couchbase.com/browse/MB-13095 is fixed
+                    (*handle).seqnum = 0xffffffffffffffff;
+                },
+                SeqNum(seq_num) => {
+                    (*handle).seqnum = seq_num;
+                },
+                _ => ()
+            }
+        }
+
+        let doc = Doc::from_raw(handle);
+
+        type GetFunc = unsafe extern fn(*mut ffi::fdb_kvs_handle, *mut ffi::fdb_doc) -> ffi::fdb_status;
+
+        let f: GetFunc = match loc {
+            Key(_) => ffi::fdb_get,
+            Offset(_) => ffi::fdb_get_byoffset,
+            SeqNum(_) => ffi::fdb_get_byseq
+        };
+
+        try_fdb!(unsafe{f(self.raw, handle)});
+
+        Ok(doc)
     }
 
-    /*
-    pub fn set_doc(doc: Doc) -> FdbResult<()> {
-        Ok(())
+    /// Sets the document
+    pub fn set_doc(&self, doc: Doc) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_set(self.raw, doc.raw)})
     }
 
-    pub fn del_doc<T>(doc: Doc) -> FdbResult<()> {
-        (*doc.raw).deleted = 1;
-        Ok(())
+    /// Deletes the document
+    ///
+    /// It's equivalent to
+    ///
+    /// ``` ignore
+    /// doc.deleted = 1;
+    /// store.set(doc)
+    /// ```
+    pub fn del_doc<T>(&self, doc: Doc) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_del(self.raw, doc.raw)})
     }
-    */
 }
 
 impl Drop for Store {
@@ -435,87 +483,15 @@ impl Drop for Iterator {
     }
 }
 
-enum LocationKind {
-    Key,
-    Offset,
-    SeqNum
+pub enum Location<'a> {
+    Key(&'a [u8]),
+    Offset(u64),
+    SeqNum(u64)
 }
 
-pub struct DocLocation {
-    raw: *mut ffi::fdb_doc,
-    kind: LocationKind
-}
-
-impl DocLocation {
-    fn from_raw(handle: *mut ffi::fdb_doc, kind: LocationKind) -> DocLocation {
-        DocLocation {raw: handle, kind: kind}
-    }
-
-    pub fn with_key<K>(key: &K) -> FdbResult<DocLocation> where K: AsSlice<u8> {
-        let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
-        let key = key.as_slice();
-        try_fdb!(unsafe {ffi::fdb_doc_create(&mut handle,
-                                             mem::transmute(key.as_ptr()), key.len() as u64,
-                                             ptr::null(), 0,
-                                             ptr::null(), 0)});
-        Ok(DocLocation::from_raw(handle, LocationKind::Key))
-    }
-
-    pub fn with_offset(offset: u64) -> FdbResult<DocLocation> {
-        let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
-        unsafe {
-            try_fdb!(ffi::fdb_doc_create(&mut handle,
-                                         ptr::null(), 0,
-                                         ptr::null(), 0,
-                                         ptr::null(), 0));
-            (*handle).offset = offset;
-            // FIXME: remove once https://issues.couchbase.com/browse/MB-13095 is fixed
-            (*handle).seqnum = 0xffffffffffffffff;
-        }
-        Ok(DocLocation::from_raw(handle, LocationKind::Offset))
-    }
-
-    pub fn with_seq_num(seq_num: u64) -> FdbResult<DocLocation> {
-        let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
-        unsafe {
-            try_fdb!(ffi::fdb_doc_create(&mut handle,
-                                         ptr::null(), 0,
-                                         ptr::null(), 0,
-                                         ptr::null(), 0));
-            (*handle).seqnum = seq_num;
-        }
-        Ok(DocLocation::from_raw(handle, LocationKind::SeqNum))
-    }
-
-    fn get_doc(self, store: &Store) -> FdbResult<Doc> {
-        use LocationKind::*;
-
-        type GetFunc = unsafe extern fn(*mut ffi::fdb_kvs_handle, *mut ffi::fdb_doc) -> ffi::fdb_status;
-
-        let f: GetFunc = match self.kind {
-            Key => ffi::fdb_get,
-            Offset => ffi::fdb_get_byoffset,
-            SeqNum => ffi::fdb_get_byseq
-        };
-
-        try_fdb!(unsafe{f(store.raw, self.raw)});
-        Ok(self.unwrap())
-    }
-
-    fn unwrap(self) -> Doc {
-        let mut tmp = self;
-        let res = Doc::from_raw(tmp.raw);
-        tmp.raw = ptr::null_mut();
-        res
-    }
-}
-
-impl Drop for DocLocation {
-    fn drop(&mut self) {
-        if self.raw != ptr::null_mut() {
-            unsafe {ffi::fdb_doc_free(self.raw)};
-            self.raw = ptr::null_mut();
-        }
+impl<'a> Location<'a> {
+    pub fn with_key<'k, K>(key: &'k K) -> Location<'k> where K: AsSlice<u8> {
+        Location::Key(key.as_slice())
     }
 }
 
@@ -787,7 +763,7 @@ impl<'a> UnsafeDoc<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FileHandle, Error, DocLocation};
+    use super::{FileHandle, Error, Location};
 
     use std::sync::atomic::{AtomicUint, ATOMIC_UINT_INIT, Ordering};
     use std::default::Default;
@@ -918,9 +894,9 @@ mod tests {
         }
         assert!(db.commit(super::CommitOptions::Normal).is_ok());
 
-        let doc1 = store.get_doc(DocLocation::with_key(&"a".as_bytes()).unwrap()).unwrap();
-        let doc2 = store.get_doc(DocLocation::with_seq_num(doc1.seq_num()).unwrap()).unwrap();
-        let doc3 = store.get_doc(DocLocation::with_offset(doc1.offset()).unwrap()).unwrap();
+        let doc1 = store.get_doc(Location::with_key(&"a".as_bytes())).unwrap();
+        let doc2 = store.get_doc(Location::SeqNum(doc1.seq_num())).unwrap();
+        let doc3 = store.get_doc(Location::Offset(doc1.offset())).unwrap();
         let v1: String = doc1.get_body().unwrap();
         let v2: String = doc2.get_body().unwrap();
         let v3: String = doc3.get_body().unwrap();
