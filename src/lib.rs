@@ -260,7 +260,7 @@ impl Drop for FileHandle {
 
 impl std::fmt::Show for FileHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str(&format!("FdbFileHandle {{path: {:?}}}", self.path)[])
+        f.write_str(&format!("Database {{path: {}}}", self.path.display())[])
     }
 }
 
