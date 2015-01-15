@@ -383,8 +383,6 @@ impl Store {
             match loc {
                 Offset(offset) => {
                     (*handle).offset = offset;
-                    // FIXME: remove once https://issues.couchbase.com/browse/MB-13095 is fixed
-                    (*handle).seqnum = 0xffffffffffffffff;
                 },
                 SeqNum(seq_num) => {
                     (*handle).seqnum = seq_num;
