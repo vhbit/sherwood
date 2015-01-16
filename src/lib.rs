@@ -299,10 +299,7 @@ impl Store {
     {
         let mut doc = try!(Doc::with_key(key));
         try!(doc.set_body(value));
-
-        lift_error!(unsafe {
-            ffi::fdb_set(self.raw, doc.raw)
-        })
+        self.set_doc(&doc)
     }
 
     /// Sets a value for key (plain KV mode)
@@ -315,6 +312,13 @@ impl Store {
             Vec::from_raw_buf(mem::transmute((*doc.raw).body),
                               (*doc.raw).bodylen as usize)
         })
+    }
+
+    pub fn del_value<K>(&self, key: &K) -> FdbResult<()>
+        where K: AsSlice<u8>
+    {
+        let doc = try!(Doc::with_key(key));
+        self.del_doc(&doc)
     }
 
     /// Creates a new iterator
