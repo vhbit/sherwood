@@ -20,6 +20,10 @@ impl Error {
     pub fn from_code(code: i32) -> Error {
         Error {code: code}
     }
+
+    pub fn is_not_found(self) -> bool {
+        self.code == ffi::FDB_RESULT_KEY_NOT_FOUND
+    }
 }
 
 impl error::Error for Error {
@@ -526,7 +530,7 @@ impl Doc {
         Doc {raw: handle}
     }
 
-    fn with_key<K>(key: &K) -> FdbResult<Doc> where K: AsSlice<u8>{
+    pub fn with_key<K>(key: &K) -> FdbResult<Doc> where K: AsSlice<u8>{
         let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
         let key = key.as_slice();
         try_fdb!(unsafe {ffi::fdb_doc_create(&mut handle,
