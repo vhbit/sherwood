@@ -552,26 +552,24 @@ impl Doc {
         })
     }
 
-    pub fn get_raw_meta<'a>(&'a self) -> Option<&'a [u8]> {
-        let meta = unsafe {(*self.raw).meta};
-        if meta == ptr::null_mut() {
+    unsafe fn get_raw_part<'a>(&'a self, part: *mut libc::c_void, len: u64) -> Option<&'a [u8]> {
+        if part == ptr::null_mut() {
             None
         } else {
-            unsafe {
-                Some(from_raw_buf(mem::transmute(&meta), (*self.raw).metalen as usize))
-            }
+            Some(from_raw_buf(mem::transmute(&part), len as usize))
         }
     }
 
+    pub fn get_raw_meta<'a>(&'a self) -> Option<&'a [u8]> {
+        unsafe { self.get_raw_part((*self.raw).meta, (*self.raw).metalen) }
+    }
+
+    pub fn get_raw_key<'a>(&'a self) -> Option<&'a [u8]> {
+        unsafe { self.get_raw_part((*self.raw).key, (*self.raw).keylen) }
+    }
+
     pub fn get_raw_body<'a>(&'a self) -> Option<&'a [u8]> {
-        let body = unsafe {(*self.raw).body};
-        if body == ptr::null_mut() {
-            None
-        } else {
-            unsafe {
-                Some(from_raw_buf(mem::transmute(&body), (*self.raw).bodylen as usize))
-            }
-        }
+        unsafe { self.get_raw_part((*self.raw).body, (*self.raw).bodylen) }
     }
 
     pub fn get_meta<T:FromBytes>(&self) -> Option<T> {
