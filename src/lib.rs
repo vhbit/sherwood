@@ -10,6 +10,7 @@ use std::error;
 use std::ffi::{CString, c_str_to_bytes};
 use std::mem;
 use std::ptr;
+use std::rc::Rc;
 use std::slice::from_raw_buf;
 
 #[derive(Copy)]
@@ -197,7 +198,7 @@ impl FileHandle {
                                             if name.is_some() {name.unwrap().as_ptr()} else {ptr::null()},
                                             mem::transmute(&config.raw)
                                             )});
-        Ok(Store::from_raw(handle, config))
+        Ok(Store::from_raw(handle))
     }
 
     /// Commit all pending doc changes
@@ -277,18 +278,34 @@ impl Default for StoreConfig {
     }
 }
 
-/// Represents ForestDB key value store
-pub struct Store {
+#[derive(Clone)]
+#[allow(raw_pointer_derive)]
+struct InnerStore {
     raw: *mut ffi::fdb_kvs_handle,
-    #[allow(dead_code)]
-    config: StoreConfig
+}
+
+impl InnerStore {
+    fn from_raw(raw: *mut ffi::fdb_kvs_handle) -> InnerStore {
+        InnerStore {raw: raw}
+    }
+}
+
+impl Drop for InnerStore {
+    fn drop(&mut self) {
+        unsafe {ffi::fdb_kvs_close(self.raw); }
+    }
+}
+
+/// Represents ForestDB key value store
+#[derive(Clone)]
+pub struct Store {
+    inner: Rc<InnerStore>
 }
 
 impl Store {
-    fn from_raw(raw: *mut ffi::fdb_kvs_handle, config: StoreConfig) -> Store {
+    fn from_raw(raw: *mut ffi::fdb_kvs_handle) -> Store {
         Store {
-            raw: raw,
-            config: config
+            inner: Rc::new(InnerStore::from_raw(raw)),
         }
     }
 
@@ -305,8 +322,9 @@ impl Store {
     /// Sets a value for key (plain KV mode)
     pub fn get_value<K>(&self, key: &K) -> FdbResult<Vec<u8>> where K: AsSlice<u8> {
         let doc = try!(Doc::with_key(key));
+
         try_fdb!(unsafe {
-            ffi::fdb_get(self.raw, doc.raw)
+            ffi::fdb_get(self.inner.raw, doc.raw)
         });
         Ok(unsafe {
             Vec::from_raw_buf(mem::transmute((*doc.raw).body),
@@ -342,7 +360,7 @@ impl Store {
         let options = if skip_deleted {NO_DELETES} else {IteratorOptions::empty()};
 
         try_fdb!(unsafe {
-            ffi::fdb_iterator_init(self.raw, &mut handle,
+            ffi::fdb_iterator_init(self.inner.raw, &mut handle,
                                    min_key, min_key_len,
                                    max_key, max_key_len,
                                    (range.options() | options).bits())
@@ -358,7 +376,7 @@ impl Store {
         let options = if skip_deleted {NO_DELETES} else {NONE};
 
         try_fdb!(unsafe {
-            ffi::fdb_iterator_sequence_init(self.raw, &mut handle,
+            ffi::fdb_iterator_sequence_init(self.inner.raw, &mut handle,
                                    min_seq,
                                    max_seq,
                                    (range.options() | options).bits())
@@ -405,14 +423,14 @@ impl Store {
             SeqNum(_) => ffi::fdb_get_byseq
         };
 
-        try_fdb!(unsafe{f(self.raw, handle)});
+        try_fdb!(unsafe{f(self.inner.raw, handle)});
 
         Ok(doc)
     }
 
     /// Sets the document
-    pub fn set_doc(&self, doc: Doc) -> FdbResult<()> {
-        lift_error!(unsafe {ffi::fdb_set(self.raw, doc.raw)})
+    pub fn set_doc(&self, doc: &Doc) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_set(self.inner.raw, doc.raw)})
     }
 
     /// Deletes the document
@@ -423,16 +441,18 @@ impl Store {
     /// doc.deleted = 1;
     /// store.set(doc)
     /// ```
-    pub fn del_doc<T>(&self, doc: Doc) -> FdbResult<()> {
-        lift_error!(unsafe {ffi::fdb_del(self.raw, doc.raw)})
+    pub fn del_doc(&self, doc: &Doc) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_del(self.inner.raw, doc.raw)})
     }
 }
 
+/*
 impl Drop for Store {
     fn drop(&mut self) {
         unsafe {ffi::fdb_kvs_close(self.raw); }
     }
 }
+*/
 
 pub struct Iterator {
     raw: *mut ffi::fdb_iterator,
@@ -809,7 +829,7 @@ mod tests {
     }
 
     #[test]
-    fn test_clone() {
+    fn test_file_handle_clone() {
         let db1 = FileHandle::open(&next_db_path(), Default::default()).unwrap();
         let db2 = db1.clone();
 
@@ -829,6 +849,15 @@ mod tests {
         let db = FileHandle::open(&next_db_path(), Default::default()).unwrap();
         assert!(db.get_default_store(Default::default()).is_ok());
         assert!(db.get_store("hello", Default::default()).is_ok())
+    }
+
+    #[test]
+    fn test_clone_store() {
+        let db = FileHandle::open(&next_db_path(), Default::default()).unwrap();
+        let store = db.get_store("hello", Default::default()).unwrap();
+        let store2 = store.clone();
+        store2.set_value(&"hello".as_bytes(), &"world".as_bytes()).unwrap();
+        // It should not fail after dropping both stores
     }
 
     #[test]
