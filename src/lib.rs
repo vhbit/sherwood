@@ -744,6 +744,16 @@ impl FromBytes for Vec<u8> {
     }
 }
 
+/// Beware - not endiannes safe
+impl FromBytes for u64 {
+    fn from_bytes(bytes: &[u8]) -> Option<u64> {
+        unsafe {
+            let data_ptr: *const u64 = mem::transmute(bytes.as_ptr());
+            Some(*data_ptr)
+        }
+    }
+}
+
 #[allow(dead_code)]
 fn empty_doc() -> ffi::fdb_doc {
     ffi::fdb_doc {
