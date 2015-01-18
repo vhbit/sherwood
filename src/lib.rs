@@ -1,4 +1,5 @@
 #![allow(unstable)]
+#![feature(unsafe_destructor)]
 
 extern crate libc;
 extern crate "libforestdb-sys" as ffi;
@@ -381,7 +382,7 @@ impl Store {
     }
 
     /// Creates a new iterator
-    pub fn key_iter<T>(&self, range: T, skip_deleted: bool) -> FdbResult<Iterator> where T: KeyRange {
+    pub fn key_iter<T, U>(&self, range: T, skip_deleted: bool) -> FdbResult<Iterator<U>> where T: KeyRange {
         let mut handle: *mut ffi::fdb_iterator = ptr::null_mut();
         let mut min_key = ptr::null();
         let mut min_key_len = 0;
@@ -409,7 +410,7 @@ impl Store {
         Ok(Iterator::from_raw(handle))
     }
 
-    pub fn seq_iter<T>(&self, range: T, skip_deleted: bool) -> FdbResult<Iterator> where T: SeqRange {
+    pub fn seq_iter<T, U>(&self, range: T, skip_deleted: bool) -> FdbResult<Iterator<U>> where T: SeqRange {
         let mut handle: *mut ffi::fdb_iterator = ptr::null_mut();
         let min_seq = range.min_seq();
         let max_seq = range.max_seq();
@@ -495,12 +496,12 @@ impl Drop for Store {
 }
 */
 
-pub struct Iterator {
+pub struct Iterator<T> {
     raw: *mut ffi::fdb_iterator,
 }
 
-impl Iterator {
-    fn from_raw(raw: *mut ffi::fdb_iterator) -> Iterator {
+impl<T> Iterator<T> {
+    fn from_raw(raw: *mut ffi::fdb_iterator) -> Iterator<T> {
         Iterator { raw: raw }
     }
 
@@ -540,7 +541,8 @@ impl Iterator {
     }
 }
 
-impl Drop for Iterator {
+#[unsafe_destructor]
+impl<T> Drop for Iterator<T> {
     fn drop(&mut self) {
         unsafe {ffi::fdb_iterator_close(self.raw)};
     }
@@ -651,7 +653,7 @@ pub struct UnsafeDoc<'a> {
     raw: ffi::fdb_doc,
 }
 
-impl std::iter::Iterator for Iterator {
+impl std::iter::Iterator for Iterator<Doc> {
     type Item = Doc;
 
     fn next(&mut self) -> Option<Doc> {
@@ -668,6 +670,28 @@ impl std::iter::Iterator for Iterator {
         (0, None)
     }
 }
+
+struct Meta;
+
+impl std::iter::Iterator for Iterator<Meta> {
+    type Item = Meta;
+
+    fn next(&mut self) -> Option<Meta> {
+        match self.get_meta_only() {
+            Err(_) => return None,
+            Ok(_doc) => {
+                let _ = self.to_next();
+                let m = Meta;
+                Some(m)
+            }
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, None)
+    }
+}
+
 
 impl KeyRange for FullRange {
     fn min_key(&self) -> Option<&[u8]> {
@@ -834,7 +858,7 @@ impl<'a> UnsafeDoc<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FileHandle, Error, Location};
+    use super::{FileHandle, Error, Location, Iterator, Doc, Meta, CommitOptions};
 
     use std::sync::atomic::{AtomicUint, ATOMIC_UINT_INIT, Ordering};
     use std::default::Default;
@@ -884,7 +908,7 @@ mod tests {
 
         let store = db1.get_default_store(Default::default()).unwrap();
         assert!(store.set_value(&"hello".as_bytes(), &"world".as_bytes()).is_ok());
-        assert!(db1.commit(super::CommitOptions::Normal).is_ok());
+        assert!(db1.commit(CommitOptions::Normal).is_ok());
 
         let _ = Thread::scoped(move || {
             let store = db2.get_default_store(Default::default()).unwrap();
@@ -929,13 +953,13 @@ mod tests {
             assert!(store.set_value(&k.as_bytes(), &k.as_bytes()).is_ok());
         }
 
-        assert!(db.commit(super::CommitOptions::Normal).is_ok());
+        assert!(db.commit(CommitOptions::Normal).is_ok());
 
-        let iter = store.key_iter(FullRange, false).unwrap();
+        let iter: Iterator<Doc> = store.key_iter(FullRange, false).unwrap();
         let values: Vec<_> = iter.map(|doc| doc.get_body::<String>().unwrap()).collect();
         assert_eq!(values, keys);
 
-        let sub_iter = store.key_iter("b".as_bytes().."d".as_bytes(), false).unwrap();
+        let sub_iter: Iterator<Doc> = store.key_iter("b".as_bytes().."d".as_bytes(), false).unwrap();
         let values: Vec<_> = sub_iter.map(|doc| doc.get_body::<String>().unwrap()).collect();
         assert_eq!(values.as_slice(), &keys[1..3]);
     }
@@ -949,15 +973,15 @@ mod tests {
         for k in keys.iter() {
             assert!(store.set_value(&k.as_bytes(), &k.as_bytes()).is_ok());
         }
-        assert!(db.commit(super::CommitOptions::Normal).is_ok());
+        assert!(db.commit(CommitOptions::Normal).is_ok());
 
-        let iter = store.seq_iter(FullRange, false).unwrap();
+        let iter: Iterator<Doc> = store.seq_iter(FullRange, false).unwrap();
         let seq_nums: Vec<_> = iter.map(|doc| doc.seq_num()).collect();
         assert_eq!(seq_nums, (1..keys.len() + 1).map(|x| x as u64).collect::<Vec<_>>());
 
         let start = 2us;
         let end = 4;
-        let sub_iter = store.seq_iter(start..end, false).unwrap();
+        let sub_iter: Iterator<Doc> = store.seq_iter(start..end, false).unwrap();
 
         let seq_nums: Vec<_> = sub_iter.map(|doc| doc.seq_num()).collect();
         assert_eq!(seq_nums, (start..end).map(|x| x as u64).collect::<Vec<_>>());
@@ -972,7 +996,7 @@ mod tests {
         for k in keys.iter() {
             assert!(store.set_value(&k.as_bytes(), &k.as_bytes()).is_ok());
         }
-        assert!(db.commit(super::CommitOptions::Normal).is_ok());
+        assert!(db.commit(CommitOptions::Normal).is_ok());
 
         let doc1 = store.get_doc(Location::with_key(&"a".as_bytes())).unwrap();
         let doc2 = store.get_doc(Location::SeqNum(doc1.seq_num())).unwrap();
