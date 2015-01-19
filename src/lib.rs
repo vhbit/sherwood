@@ -354,12 +354,12 @@ impl Store {
 
         if let Some(key) = range.min_key() {
             min_key = unsafe {mem::transmute(key.as_ptr())};
-            min_key_len = key.len() as u64;
+            min_key_len = key.len() as libc::size_t;
         }
 
         if let Some(key) = range.max_key() {
             max_key = unsafe {mem::transmute(key.as_ptr())};
-            max_key_len = key.len() as u64;
+            max_key_len = key.len() as libc::size_t;
         }
 
         let options = if skip_deleted {NO_DELETES} else {IteratorOptions::empty()};
@@ -402,7 +402,7 @@ impl Store {
         }
 
         try_fdb!(unsafe {ffi::fdb_doc_create(&mut handle,
-                                             mem::transmute(key_ptr), key_len as u64,
+                                             mem::transmute(key_ptr), key_len as libc::size_t,
                                              ptr::null(), 0,
                                              ptr::null(), 0)});
 
@@ -499,7 +499,7 @@ impl Iterator {
     pub fn to_key<K>(&self, key: &K, options: SeekOptions) -> FdbResult<()> where K: AsSlice<u8> {
         let key = key.as_slice();
         lift_error!(unsafe {ffi::fdb_iterator_seek(self.raw,
-                                                   mem::transmute(key.as_ptr()), key.len() as u64,
+                                                   mem::transmute(key.as_ptr()), key.len() as libc::size_t,
                                                    options as ffi::fdb_iterator_seek_opt_t)})
     }
 }
@@ -535,7 +535,7 @@ impl Doc {
         let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
         let key = key.as_slice();
         try_fdb!(unsafe {ffi::fdb_doc_create(&mut handle,
-                                             mem::transmute(key.as_ptr()), key.len() as u64,
+                                             mem::transmute(key.as_ptr()), key.len() as libc::size_t,
                                              ptr::null(), 0,
                                              ptr::null(), 0)});
         Ok(Doc::from_raw(handle))
@@ -545,19 +545,19 @@ impl Doc {
         let body = body.as_slice();
         lift_error!(unsafe {ffi::fdb_doc_update(&mut self.raw,
                                                 ptr::null(), 0,
-                                                mem::transmute(body.as_ptr()), body.len() as u64)
+                                                mem::transmute(body.as_ptr()), body.len() as libc::size_t)
         })
     }
 
     pub fn set_meta<M>(&mut self, meta: &M) -> FdbResult<()> where M: AsSlice<u8> {
         let meta = meta.as_slice();
         lift_error!(unsafe {ffi::fdb_doc_update(&mut self.raw,
-                                                mem::transmute(meta.as_ptr()), meta.len() as u64,
+                                                mem::transmute(meta.as_ptr()), meta.len() as libc::size_t,
                                                 ptr::null(), 0)
         })
     }
 
-    unsafe fn get_raw_part<'a>(&'a self, part: *mut libc::c_void, len: u64) -> Option<&'a [u8]> {
+    unsafe fn get_raw_part<'a>(&'a self, part: *mut libc::c_void, len: libc::size_t) -> Option<&'a [u8]> {
         if part == ptr::null_mut() {
             None
         } else {
