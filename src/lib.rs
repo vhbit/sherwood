@@ -3,6 +3,7 @@
 extern crate libc;
 extern crate "libforestdb-sys" as ffi;
 
+#[macro_use] extern crate bitflags;
 #[macro_use] extern crate log;
 
 use std::default::Default;

@@ -11,4 +11,5 @@ keywords = ["db", "database", "key-value", "forestdb", "kvs"]
 path = "libforestdb-sys"
 
 [dependencies]
+bitflags = "0.1"
 log = "0.1"
