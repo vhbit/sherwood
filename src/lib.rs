@@ -136,6 +136,19 @@ pub struct Config {
 }
 
 impl Config {
+    fn from_raw(raw: ffi::fdb_config) -> Config {
+        Config {
+            raw: raw
+        }
+    }
+
+    pub fn new() -> Config {
+        Default::default()
+    }
+
+    pub fn custom() -> ConfigBuilder {
+        ConfigBuilder::new()
+    }
 }
 
 impl Default for Config {
@@ -143,6 +156,29 @@ impl Default for Config {
         Config {
             raw: unsafe { ffi::fdb_get_default_config() }
         }
+    }
+}
+
+#[allow(missing_copy_implementations)]
+pub struct ConfigBuilder {
+    raw: ffi::fdb_config
+}
+
+impl ConfigBuilder {
+    pub fn new() -> ConfigBuilder {
+        ConfigBuilder {
+            raw: unsafe { ffi::fdb_get_default_config() }
+        }
+    }
+
+    pub fn set_cache_size(mut self, size: u64) -> ConfigBuilder {
+        self.raw.buffercache_size = size;
+        self
+    }
+
+    pub fn build(self) -> Config {
+        let tmp = self;
+        Config::from_raw(tmp.raw)
     }
 }
 
