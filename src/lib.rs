@@ -60,33 +60,52 @@ pub trait SeqRange {
     }
 }
 
+
+/// Trait for accessing key data from a document representation
 pub trait DocKey {
+    /// Retrieves document key as raw data
     fn get_raw_key<'a>(&'a self) -> Option<&'a [u8]>;
 
+    /// Converts key into corresponding data
     fn get_key<T: FromBytes>(&self) -> Option<T> {
         self.get_raw_key().and_then(|x| FromBytes::from_bytes(x))
     }
 }
 
+/// Trait for accessing document body
 pub trait DocBody {
+    /// Sets document body, data is copied
     fn set_body<B>(&mut self, body: &B) -> FdbResult<()> where B: AsSlice<u8>;
+
+    /// Sets document meta, data is copied
     fn set_meta<M>(&mut self, meta: &M) -> FdbResult<()> where M: AsSlice<u8>;
+
+    /// Retrieves body as raw bytes
     fn get_raw_body<'a>(&'a self) -> Option<&'a [u8]>;
 
+    /// Converts body
     fn get_body<T:FromBytes>(&self) -> Option<T> {
         self.get_raw_body().and_then(|x| FromBytes::from_bytes(x))
     }
 }
 
+/// Trait for accessing document metadata
 pub trait DocMeta {
+    /// Retrieves meta as raw bytes
     fn get_raw_meta<'a>(&'a self) -> Option<&'a [u8]>;
 
+    /// Converts meta
     fn get_meta<T:FromBytes>(&self) -> Option<T> {
         self.get_raw_meta().and_then(|x| FromBytes::from_bytes(x))
     }
 
+    /// Returns sequence number for document
     fn seq_num(&self) -> u64;
+
+    /// Checks if document was deleted
     fn is_deleted(&self) -> bool;
+
+    /// Returns raw offset of document in file
     fn offset(&self) -> u64;
 }
 
@@ -119,8 +138,11 @@ macro_rules! try_fdb {
 
 #[repr(u8)]
 #[derive(Copy)]
+/// Commit options
 pub enum CommitOptions {
+    /// Commit normally
     Normal = ffi::FDB_COMMIT_NORMAL as u8,
+    /// Commit and flush WAL
     ManualWalFlush = ffi::FDB_COMMIT_MANUAL_WAL_FLUSH as u8
 }
 
@@ -151,6 +173,8 @@ bitflags!{
 
 #[repr(u8)]
 #[derive(Copy)]
+/// Specifies behavior of iterator if requested key
+/// is not found
 pub enum SeekOptions {
     /// If seek key does not exist return the next sorted
     /// key higher than it
@@ -162,6 +186,7 @@ pub enum SeekOptions {
 
 
 #[derive(Copy)]
+/// FileHandle configuration
 pub struct Config {
     raw: ffi::fdb_config
 }
@@ -202,6 +227,7 @@ impl ConfigBuilder {
         }
     }
 
+    /// Sets cache size
     pub fn set_cache_size(mut self, size: u64) -> ConfigBuilder {
         self.raw.buffercache_size = size;
         self
@@ -344,6 +370,7 @@ impl std::fmt::Show for FileHandle {
 }
 
 #[derive(Copy)]
+/// Configuration of KvHandle
 pub struct StoreConfig {
     raw: ffi::fdb_kvs_config
 }
@@ -600,34 +627,42 @@ impl<T> Iterator<T> {
         Iterator { raw: raw }
     }
 
+    /// Moves to next key
     pub fn to_next(&self) -> FdbResult<()> {
         lift_error!(unsafe {ffi::fdb_iterator_next(self.raw)})
     }
 
+    /// Moves to previous key
     pub fn to_prev(&self) -> FdbResult<()> {
         lift_error!(unsafe {ffi::fdb_iterator_prev(self.raw)})
     }
 
+    /// Retrieve full document from current position
     pub fn get_doc(&self) -> FdbResult<Doc> {
         let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
         try_fdb!(unsafe {ffi::fdb_iterator_get(self.raw, &mut handle)});
         Ok(Doc::with_inner(InnerDoc::from_raw(handle)))
     }
 
+    /// Retrieve only document metadata from current position
     pub fn get_meta_only(&self) -> FdbResult<Meta> {
         let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
         try_fdb!(unsafe {ffi::fdb_iterator_get_metaonly(self.raw, &mut handle)});
         Ok(Meta::with_inner(InnerDoc::from_raw(handle)))
     }
 
+    /// Move to the min key in range
     pub fn to_min_key(&self) -> FdbResult<()> {
         lift_error!(unsafe {ffi::fdb_iterator_seek_to_min(self.raw)})
     }
 
+    /// Move to the max key in range
     pub fn to_max_key(&self) -> FdbResult<()> {
         lift_error!(unsafe {ffi::fdb_iterator_seek_to_max(self.raw)})
     }
 
+    /// Moves to specified key, uses options to determine what to do
+    /// if key wasn't found
     pub fn to_key<K>(&self, key: &K, options: SeekOptions) -> FdbResult<()> where K: AsSlice<u8> {
         let key = key.as_slice();
         lift_error!(unsafe {ffi::fdb_iterator_seek(self.raw,
@@ -643,9 +678,14 @@ impl<T> Drop for Iterator<T> {
     }
 }
 
+
+/// Specifies how to search for document
 pub enum Location<'a> {
+    /// Find document by key
     Key(&'a [u8]),
+    /// Find document by raw data offset
     Offset(u64),
+    /// Find document by document sequence number
     SeqNum(u64)
 }
 
@@ -747,6 +787,8 @@ impl Drop for InnerDoc {
     }
 }
 
+/// Represents a document which was fully
+/// retrieved from db
 pub struct Doc {
     inner: InnerDoc
 }
@@ -756,6 +798,7 @@ impl Doc {
         Doc {inner: inner}
     }
 
+    /// Create a new document with specified key
     pub fn with_key<K>(key: &K) -> FdbResult<Doc> where K: AsSlice<u8> {
         let inner = try!(InnerDoc::with_key(key));
         Ok(Doc::with_inner(inner))
@@ -806,6 +849,8 @@ impl DocMeta for Doc {
     }
 }
 
+/// Represents a document for which only meta
+/// was retrieved - it's key, seq_num, offset and meta itself
 pub struct Meta {
     inner: InnerDoc
 }
@@ -815,6 +860,7 @@ impl Meta {
         Meta {inner: inner}
     }
 
+    /// Convert into doc for update
     pub fn into_doc(self) -> Doc {
         let tmp = self;
         Doc::with_inner(tmp.inner)
