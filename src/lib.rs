@@ -898,7 +898,7 @@ impl DocMeta for Meta {
 }
 
 #[allow(dead_code)]
-pub struct UnsafeDoc<'a> {
+struct UnsafeDoc<'a> {
     raw: ffi::fdb_doc,
 }
 
