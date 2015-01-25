@@ -253,17 +253,17 @@ impl FileHandle {
     }
 
     /// Retrieves default store
-    pub fn get_default_store(&self, config: StoreConfig) -> FdbResult<Store> {
+    pub fn get_default_store(&self, config: StoreConfig) -> FdbResult<Store<ReadWrite>> {
         self._get_store(None, config)
     }
 
     /// Retrieves store by name
-    pub fn get_store(&self, name: &str, config: StoreConfig) -> FdbResult<Store> {
+    pub fn get_store(&self, name: &str, config: StoreConfig) -> FdbResult<Store<ReadWrite>> {
         let c_name = CString::from_slice(name.as_bytes());
         self._get_store(Some(c_name), config)
     }
 
-    fn _get_store(&self, name: Option<CString>, config: StoreConfig) -> FdbResult<Store> {
+    fn _get_store(&self, name: Option<CString>, config: StoreConfig) -> FdbResult<Store<ReadWrite>> {
         let mut handle: *mut ffi::fdb_kvs_handle = ptr::null_mut();
         try_fdb!(unsafe { ffi::fdb_kvs_open(self.raw,
                                             mem::transmute(&mut handle),
@@ -307,6 +307,12 @@ impl FileHandle {
     /// Aborts current transaction
     pub fn abort_transaction(&self) -> FdbResult<()> {
         lift_error!(unsafe {ffi::fdb_abort_transaction(self.raw)})
+    }
+
+    /// Rollbacks file handle to specified seq num
+    pub fn rollback(&self, seq_num: u64) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_rollback(mem::transmute(&self.raw),
+                                              seq_num)})
     }
 }
 
@@ -370,27 +376,22 @@ impl Drop for InnerStore {
     }
 }
 
+
+#[allow(missing_copy_implementations)]
+pub enum ReadOnly {}
+#[allow(missing_copy_implementations)]
+pub enum ReadWrite {}
+
 /// Represents ForestDB key value store
-#[derive(Clone)]
-pub struct Store {
+pub struct Store<T> {
     inner: Rc<InnerStore>
 }
 
-impl Store {
-    fn from_raw(raw: *mut ffi::fdb_kvs_handle) -> Store {
+impl<Access> Store<Access> {
+    fn from_raw(raw: *mut ffi::fdb_kvs_handle) -> Store<Access> {
         Store {
             inner: Rc::new(InnerStore::from_raw(raw)),
         }
-    }
-
-    /// Retrieves a value by key (plain KV mode)
-    pub fn set_value<K, V>(&self, key: &K, value: &V) -> FdbResult<()>
-        where K: AsSlice<u8>,
-              V: AsSlice<u8>
-    {
-        let mut doc = try!(InnerDoc::with_key(key));
-        try!(doc.set_body(value));
-        self.set_inner_doc(&doc)
     }
 
     /// Sets a value for key (plain KV mode)
@@ -404,13 +405,6 @@ impl Store {
             Vec::from_raw_buf(mem::transmute((*doc.raw).body),
                               (*doc.raw).bodylen as usize)
         })
-    }
-
-    pub fn del_value<K>(&self, key: &K) -> FdbResult<()>
-        where K: AsSlice<u8>
-    {
-        let doc = try!(InnerDoc::with_key(key));
-        self.del_inner_doc(&doc)
     }
 
     /// Creates a new iterator
@@ -518,6 +512,39 @@ impl Store {
         Ok(Meta::with_inner(inner))
     }
 
+    /// Returns max seq number of current store
+    pub fn seq_num(&self) -> FdbResult<u64> {
+        let mut result: u64 = 0;
+        try_fdb!(unsafe {ffi::fdb_get_kvs_seqnum(self.inner.raw, &mut result)});
+        Ok(result)
+    }
+
+    /// Creates a snapshot on specified seq_num
+    pub fn snapshot(&self, seq_num: u64) -> FdbResult<Store<ReadOnly>> {
+        let mut handle: *mut ffi::fdb_kvs_handle = ptr::null_mut();
+        try_fdb!(unsafe {ffi::fdb_snapshot_open(self.inner.raw, &mut handle, seq_num)});
+        Ok(Store::from_raw(handle))
+    }
+}
+
+impl Store<ReadWrite> {
+    /// Retrieves a value by key (plain KV mode)
+    pub fn set_value<K, V>(&self, key: &K, value: &V) -> FdbResult<()>
+        where K: AsSlice<u8>,
+              V: AsSlice<u8>
+    {
+        let mut doc = try!(InnerDoc::with_key(key));
+        try!(doc.set_body(value));
+        self.set_inner_doc(&doc)
+    }
+
+    pub fn del_value<K>(&self, key: &K) -> FdbResult<()>
+        where K: AsSlice<u8>
+    {
+        let doc = try!(InnerDoc::with_key(key));
+        self.del_inner_doc(&doc)
+    }
+
     fn set_inner_doc(&self, doc: &InnerDoc) -> FdbResult<()> {
         lift_error!(unsafe {ffi::fdb_set(self.inner.raw, doc.raw)})
     }
@@ -544,10 +571,18 @@ impl Store {
         self.del_inner_doc(&doc.inner)
     }
 
+    /// Deletes the document specified by available meta
     pub fn del_meta(&self, meta: &Meta) -> FdbResult<()>  {
         self.del_inner_doc(&meta.inner)
     }
 }
+
+impl<T> Clone for Store<T> {
+    fn clone(&self) -> Store<T> {
+        Store {inner: self.inner.clone()}
+    }
+}
+
 
 pub struct Iterator<T> {
     raw: *mut ffi::fdb_iterator,
@@ -808,8 +843,6 @@ impl DocMeta for Meta {
         self.inner.offset()
     }
 }
-
-
 
 #[allow(dead_code)]
 pub struct UnsafeDoc<'a> {
