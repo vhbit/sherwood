@@ -253,24 +253,24 @@ impl FileHandle {
     }
 
     /// Retrieves default store
-    pub fn get_default_store(&self, config: StoreConfig) -> FdbResult<Store<ReadWrite>> {
+    pub fn get_default_store(&self, config: StoreConfig) -> FdbResult<KvHandle<ReadWrite>> {
         self._get_store(None, config)
     }
 
     /// Retrieves store by name
-    pub fn get_store(&self, name: &str, config: StoreConfig) -> FdbResult<Store<ReadWrite>> {
+    pub fn get_store(&self, name: &str, config: StoreConfig) -> FdbResult<KvHandle<ReadWrite>> {
         let c_name = CString::from_slice(name.as_bytes());
         self._get_store(Some(c_name), config)
     }
 
-    fn _get_store(&self, name: Option<CString>, config: StoreConfig) -> FdbResult<Store<ReadWrite>> {
+    fn _get_store(&self, name: Option<CString>, config: StoreConfig) -> FdbResult<KvHandle<ReadWrite>> {
         let mut handle: *mut ffi::fdb_kvs_handle = ptr::null_mut();
         try_fdb!(unsafe { ffi::fdb_kvs_open(self.raw,
                                             mem::transmute(&mut handle),
                                             if name.is_some() {name.unwrap().as_ptr()} else {ptr::null()},
                                             mem::transmute(&config.raw)
                                             )});
-        Ok(Store::from_raw(handle))
+        Ok(KvHandle::from_raw(handle))
     }
 
     /// Commit all pending doc changes
@@ -360,17 +360,17 @@ type GetDocFunc = unsafe extern fn(*mut ffi::fdb_kvs_handle, *mut ffi::fdb_doc) 
 
 #[derive(Clone)]
 #[allow(raw_pointer_derive)]
-struct InnerStore {
+struct InnerKvHandle {
     raw: *mut ffi::fdb_kvs_handle,
 }
 
-impl InnerStore {
-    fn from_raw(raw: *mut ffi::fdb_kvs_handle) -> InnerStore {
-        InnerStore {raw: raw}
+impl InnerKvHandle {
+    fn from_raw(raw: *mut ffi::fdb_kvs_handle) -> InnerKvHandle {
+        InnerKvHandle {raw: raw}
     }
 }
 
-impl Drop for InnerStore {
+impl Drop for InnerKvHandle {
     fn drop(&mut self) {
         unsafe {ffi::fdb_kvs_close(self.raw); }
     }
@@ -383,14 +383,14 @@ pub enum ReadOnly {}
 pub enum ReadWrite {}
 
 /// Represents ForestDB key value store
-pub struct Store<T> {
-    inner: Rc<InnerStore>
+pub struct KvHandle<T> {
+    inner: Rc<InnerKvHandle>
 }
 
-impl<Access> Store<Access> {
-    fn from_raw(raw: *mut ffi::fdb_kvs_handle) -> Store<Access> {
-        Store {
-            inner: Rc::new(InnerStore::from_raw(raw)),
+impl<Access> KvHandle<Access> {
+    fn from_raw(raw: *mut ffi::fdb_kvs_handle) -> KvHandle<Access> {
+        KvHandle {
+            inner: Rc::new(InnerKvHandle::from_raw(raw)),
         }
     }
 
@@ -520,14 +520,14 @@ impl<Access> Store<Access> {
     }
 
     /// Creates a snapshot on specified seq_num
-    pub fn snapshot(&self, seq_num: u64) -> FdbResult<Store<ReadOnly>> {
+    pub fn snapshot(&self, seq_num: u64) -> FdbResult<KvHandle<ReadOnly>> {
         let mut handle: *mut ffi::fdb_kvs_handle = ptr::null_mut();
         try_fdb!(unsafe {ffi::fdb_snapshot_open(self.inner.raw, &mut handle, seq_num)});
-        Ok(Store::from_raw(handle))
+        Ok(KvHandle::from_raw(handle))
     }
 }
 
-impl Store<ReadWrite> {
+impl KvHandle<ReadWrite> {
     /// Retrieves a value by key (plain KV mode)
     pub fn set_value<K, V>(&self, key: &K, value: &V) -> FdbResult<()>
         where K: AsSlice<u8>,
@@ -577,12 +577,14 @@ impl Store<ReadWrite> {
     }
 }
 
-impl<T> Clone for Store<T> {
-    fn clone(&self) -> Store<T> {
-        Store {inner: self.inner.clone()}
+impl<T> Clone for KvHandle<T> {
+    fn clone(&self) -> KvHandle<T> {
+        KvHandle {inner: self.inner.clone()}
     }
 }
 
+pub type Store = KvHandle<ReadWrite>;
+pub type Snapshot = KvHandle<ReadOnly>;
 
 pub struct Iterator<T> {
     raw: *mut ffi::fdb_iterator,
@@ -1225,7 +1227,6 @@ mod tests {
         let mut doc = meta1.into_doc();
         let new_value = "new_value";
         assert!(doc.set_body(&new_value.as_bytes()).is_ok());
-
         assert!(store.set_doc(&doc).is_ok());
 
         let doc2 = store.get_doc(Location::SeqNum(doc.seq_num())).unwrap();
