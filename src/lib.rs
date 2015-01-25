@@ -407,7 +407,7 @@ impl<Access> KvHandle<Access> {
         })
     }
 
-    /// Creates a new iterator
+    /// Creates a new iterator through key range
     pub fn key_iter<T, U>(&self, range: T, skip_deleted: bool) -> FdbResult<Iterator<U>> where T: KeyRange {
         let mut handle: *mut ffi::fdb_iterator = ptr::null_mut();
         let mut min_key = ptr::null();
@@ -436,6 +436,7 @@ impl<Access> KvHandle<Access> {
         Ok(Iterator::from_raw(handle))
     }
 
+    /// Creates a new iterator through range of seq numbers
     pub fn seq_iter<T, U>(&self, range: T, skip_deleted: bool) -> FdbResult<Iterator<U>> where T: SeqRange {
         let mut handle: *mut ffi::fdb_iterator = ptr::null_mut();
         let min_seq = range.min_seq();
@@ -488,6 +489,7 @@ impl<Access> KvHandle<Access> {
         Ok(doc)
     }
 
+    /// Retrieves whole document specified by location
     pub fn get_doc<'l>(&self, loc: Location<'l>) -> FdbResult<Doc> {
         use Location::*;
 
@@ -500,6 +502,9 @@ impl<Access> KvHandle<Access> {
         Ok(Doc::with_inner(inner))
     }
 
+    /// Retrieves only meta data from document
+    /// Note: it doesn't support retrieval through offset
+    /// and will panic if corresponding location is used
     pub fn get_meta<'l>(&self, loc: Location<'l>) -> FdbResult<Meta> {
         use Location::*;
 
@@ -538,6 +543,7 @@ impl KvHandle<ReadWrite> {
         self.set_inner_doc(&doc)
     }
 
+    /// Deletes a value by key (plain KV mode)
     pub fn del_value<K>(&self, key: &K) -> FdbResult<()>
         where K: AsSlice<u8>
     {
@@ -566,7 +572,6 @@ impl KvHandle<ReadWrite> {
     /// doc.deleted = 1;
     /// store.set(doc)
     /// ```
-
     pub fn del_doc(&self, doc: &Doc) -> FdbResult<()>  {
         self.del_inner_doc(&doc.inner)
     }
