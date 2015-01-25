@@ -60,6 +60,36 @@ pub trait SeqRange {
     }
 }
 
+pub trait DocKey {
+    fn get_raw_key<'a>(&'a self) -> Option<&'a [u8]>;
+
+    fn get_key<T: FromBytes>(&self) -> Option<T> {
+        self.get_raw_key().and_then(|x| FromBytes::from_bytes(x))
+    }
+}
+
+pub trait DocBody {
+    fn set_body<B>(&mut self, body: &B) -> FdbResult<()> where B: AsSlice<u8>;
+    fn set_meta<M>(&mut self, meta: &M) -> FdbResult<()> where M: AsSlice<u8>;
+    fn get_raw_body<'a>(&'a self) -> Option<&'a [u8]>;
+
+    fn get_body<T:FromBytes>(&self) -> Option<T> {
+        self.get_raw_body().and_then(|x| FromBytes::from_bytes(x))
+    }
+}
+
+pub trait DocMeta {
+    fn get_raw_meta<'a>(&'a self) -> Option<&'a [u8]>;
+
+    fn get_meta<T:FromBytes>(&self) -> Option<T> {
+        self.get_raw_meta().and_then(|x| FromBytes::from_bytes(x))
+    }
+
+    fn seq_num(&self) -> u64;
+    fn is_deleted(&self) -> bool;
+    fn offset(&self) -> u64;
+}
+
 pub trait FromBytes {
     fn from_bytes(bytes: &[u8]) -> Option<Self>;
 }
@@ -320,6 +350,8 @@ impl Default for StoreConfig {
     }
 }
 
+type GetDocFunc = unsafe extern fn(*mut ffi::fdb_kvs_handle, *mut ffi::fdb_doc) -> ffi::fdb_status;
+
 #[derive(Clone)]
 #[allow(raw_pointer_derive)]
 struct InnerStore {
@@ -356,14 +388,14 @@ impl Store {
         where K: AsSlice<u8>,
               V: AsSlice<u8>
     {
-        let mut doc = try!(Doc::with_key(key));
+        let mut doc = try!(InnerDoc::with_key(key));
         try!(doc.set_body(value));
-        self.set_doc(&doc)
+        self.set_inner_doc(&doc)
     }
 
     /// Sets a value for key (plain KV mode)
     pub fn get_value<K>(&self, key: &K) -> FdbResult<Vec<u8>> where K: AsSlice<u8> {
-        let doc = try!(Doc::with_key(key));
+        let doc = try!(InnerDoc::with_key(key));
 
         try_fdb!(unsafe {
             ffi::fdb_get(self.inner.raw, doc.raw)
@@ -377,8 +409,8 @@ impl Store {
     pub fn del_value<K>(&self, key: &K) -> FdbResult<()>
         where K: AsSlice<u8>
     {
-        let doc = try!(Doc::with_key(key));
-        self.del_doc(&doc)
+        let doc = try!(InnerDoc::with_key(key));
+        self.del_inner_doc(&doc)
     }
 
     /// Creates a new iterator
@@ -426,7 +458,7 @@ impl Store {
         Ok(Iterator::from_raw(handle))
     }
 
-    pub fn get_doc<'l>(&self, loc: Location<'l>) -> FdbResult<Doc> {
+    fn get_inner_doc<'l>(&self, loc: Location<'l>, f: GetDocFunc) -> FdbResult<InnerDoc> {
         use Location::*;
 
         let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
@@ -455,24 +487,48 @@ impl Store {
             }
         }
 
-        let doc = Doc::from_raw(handle);
-
-        type GetFunc = unsafe extern fn(*mut ffi::fdb_kvs_handle, *mut ffi::fdb_doc) -> ffi::fdb_status;
-
-        let f: GetFunc = match loc {
-            Key(_) => ffi::fdb_get,
-            Offset(_) => ffi::fdb_get_byoffset,
-            SeqNum(_) => ffi::fdb_get_byseq
-        };
+        let doc = InnerDoc::from_raw(handle);
 
         try_fdb!(unsafe{f(self.inner.raw, handle)});
 
         Ok(doc)
     }
 
+    pub fn get_doc<'l>(&self, loc: Location<'l>) -> FdbResult<Doc> {
+        use Location::*;
+
+        let f: GetDocFunc = match loc {
+            Key(_) => ffi::fdb_get,
+            Offset(_) => ffi::fdb_get_byoffset,
+            SeqNum(_) => ffi::fdb_get_byseq
+        };
+        let inner = try!(self.get_inner_doc(loc, f));
+        Ok(Doc::with_inner(inner))
+    }
+
+    pub fn get_meta<'l>(&self, loc: Location<'l>) -> FdbResult<Meta> {
+        use Location::*;
+
+        let f: GetDocFunc = match loc {
+            Key(_) => ffi::fdb_get_metaonly,
+            Offset(_) => panic!("Can't get meta by offset"),
+            SeqNum(_) => ffi::fdb_get_metaonly_byseq
+        };
+        let inner = try!(self.get_inner_doc(loc, f));
+        Ok(Meta::with_inner(inner))
+    }
+
+    fn set_inner_doc(&self, doc: &InnerDoc) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_set(self.inner.raw, doc.raw)})
+    }
+
     /// Sets the document
     pub fn set_doc(&self, doc: &Doc) -> FdbResult<()> {
-        lift_error!(unsafe {ffi::fdb_set(self.inner.raw, doc.raw)})
+        self.set_inner_doc(&doc.inner)
+    }
+
+    fn del_inner_doc(&self, doc: &InnerDoc) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_del(self.inner.raw, doc.raw)})
     }
 
     /// Deletes the document
@@ -483,18 +539,15 @@ impl Store {
     /// doc.deleted = 1;
     /// store.set(doc)
     /// ```
-    pub fn del_doc(&self, doc: &Doc) -> FdbResult<()> {
-        lift_error!(unsafe {ffi::fdb_del(self.inner.raw, doc.raw)})
-    }
-}
 
-/*
-impl Drop for Store {
-    fn drop(&mut self) {
-        unsafe {ffi::fdb_kvs_close(self.raw); }
+    pub fn del_doc(&self, doc: &Doc) -> FdbResult<()>  {
+        self.del_inner_doc(&doc.inner)
+    }
+
+    pub fn del_meta(&self, meta: &Meta) -> FdbResult<()>  {
+        self.del_inner_doc(&meta.inner)
     }
 }
-*/
 
 pub struct Iterator<T> {
     raw: *mut ffi::fdb_iterator,
@@ -516,13 +569,13 @@ impl<T> Iterator<T> {
     pub fn get_doc(&self) -> FdbResult<Doc> {
         let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
         try_fdb!(unsafe {ffi::fdb_iterator_get(self.raw, &mut handle)});
-        Ok(Doc::from_raw(handle))
+        Ok(Doc::with_inner(InnerDoc::from_raw(handle)))
     }
 
-    pub fn get_meta_only(&self) -> FdbResult<Doc> {
+    pub fn get_meta_only(&self) -> FdbResult<Meta> {
         let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
         try_fdb!(unsafe {ffi::fdb_iterator_get_metaonly(self.raw, &mut handle)});
-        Ok(Doc::from_raw(handle))
+        Ok(Meta::with_inner(InnerDoc::from_raw(handle)))
     }
 
     pub fn to_min_key(&self) -> FdbResult<()> {
@@ -560,26 +613,26 @@ impl<'a> Location<'a> {
     }
 }
 
-pub struct Doc {
+struct InnerDoc {
     raw: *mut ffi::fdb_doc
 }
 
-impl Doc {
-    fn from_raw(handle: *mut ffi::fdb_doc) -> Doc {
-        Doc {raw: handle}
+impl InnerDoc {
+    fn from_raw(handle: *mut ffi::fdb_doc) -> InnerDoc {
+        InnerDoc {raw: handle}
     }
 
-    pub fn with_key<K>(key: &K) -> FdbResult<Doc> where K: AsSlice<u8>{
+    fn with_key<K>(key: &K) -> FdbResult<InnerDoc> where K: AsSlice<u8> {
         let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
         let key = key.as_slice();
         try_fdb!(unsafe {ffi::fdb_doc_create(&mut handle,
                                              mem::transmute(key.as_ptr()), key.len() as libc::size_t,
                                              ptr::null(), 0,
                                              ptr::null(), 0)});
-        Ok(Doc::from_raw(handle))
+        Ok(InnerDoc::from_raw(handle))
     }
 
-    pub fn set_body<B>(&mut self, body: &B) -> FdbResult<()> where B: AsSlice<u8> {
+    fn set_body<B>(&mut self, body: &B) -> FdbResult<()> where B: AsSlice<u8> {
         let body = body.as_slice();
         lift_error!(unsafe {ffi::fdb_doc_update(&mut self.raw,
                                                 ptr::null(), 0,
@@ -587,7 +640,7 @@ impl Doc {
         })
     }
 
-    pub fn set_meta<M>(&mut self, meta: &M) -> FdbResult<()> where M: AsSlice<u8> {
+    fn set_meta<M>(&mut self, meta: &M) -> FdbResult<()> where M: AsSlice<u8> {
         let meta = meta.as_slice();
         lift_error!(unsafe {ffi::fdb_doc_update(&mut self.raw,
                                                 mem::transmute(meta.as_ptr()), meta.len() as libc::size_t,
@@ -603,50 +656,160 @@ impl Doc {
         }
     }
 
-    pub fn get_raw_meta<'a>(&'a self) -> Option<&'a [u8]> {
+    fn get_raw_meta<'a>(&'a self) -> Option<&'a [u8]> {
         unsafe { self.get_raw_part((*self.raw).meta, (*self.raw).metalen) }
     }
 
-    pub fn get_raw_key<'a>(&'a self) -> Option<&'a [u8]> {
+    /*
+    fn get_meta<T:FromBytes>(&self) -> Option<T> {
+        self.get_raw_meta().and_then(|x| FromBytes::from_bytes(x))
+    }
+    */
+
+    fn get_raw_key<'a>(&'a self) -> Option<&'a [u8]> {
         unsafe { self.get_raw_part((*self.raw).key, (*self.raw).keylen) }
     }
 
-    pub fn get_raw_body<'a>(&'a self) -> Option<&'a [u8]> {
+    fn get_raw_body<'a>(&'a self) -> Option<&'a [u8]> {
         unsafe { self.get_raw_part((*self.raw).body, (*self.raw).bodylen) }
     }
 
-    pub fn get_meta<T:FromBytes>(&self) -> Option<T> {
-        self.get_raw_meta().and_then(|x| FromBytes::from_bytes(x))
-    }
-
-    pub fn get_body<T:FromBytes>(&self) -> Option<T> {
+    /*
+    fn get_body<T:FromBytes>(&self) -> Option<T> {
         self.get_raw_body().and_then(|x| FromBytes::from_bytes(x))
     }
+    */
 
     /// Sequence number assigned to the doc
     #[inline(always)]
-    pub fn seq_num(&self) -> u64 {
+    fn seq_num(&self) -> u64 {
         unsafe { (*self.raw).seqnum }
     }
 
     /// Is doc deleted?
     #[inline(always)]
-    pub fn is_deleted(&self) -> bool {
+    fn is_deleted(&self) -> bool {
         unsafe { (*self.raw).deleted != 0 }
     }
 
     /// Offset to the doc on disk
     #[inline(always)]
-    pub fn offset(&self) -> u64 {
+    fn offset(&self) -> u64 {
         unsafe { (*self.raw).offset }
     }
 }
 
-impl Drop for Doc {
+impl Drop for InnerDoc {
     fn drop(&mut self) {
         unsafe {ffi::fdb_doc_free(self.raw)};
     }
 }
+
+pub struct Doc {
+    inner: InnerDoc
+}
+
+impl Doc {
+    fn with_inner(inner: InnerDoc) -> Doc {
+        Doc {inner: inner}
+    }
+
+    pub fn with_key<K>(key: &K) -> FdbResult<Doc> where K: AsSlice<u8> {
+        let inner = try!(InnerDoc::with_key(key));
+        Ok(Doc::with_inner(inner))
+    }
+}
+
+impl DocKey for Doc {
+    fn get_raw_key<'a>(&'a self) -> Option<&'a [u8]> {
+        self.inner.get_raw_key()
+    }
+}
+
+impl DocBody for Doc {
+    fn set_body<B>(&mut self, body: &B) -> FdbResult<()> where B: AsSlice<u8> {
+        self.inner.set_body(body)
+    }
+
+    fn set_meta<M>(&mut self, meta: &M) -> FdbResult<()> where M: AsSlice<u8> {
+        self.inner.set_meta(meta)
+    }
+
+    fn get_raw_body<'a>(&'a self) -> Option<&'a [u8]> {
+        self.inner.get_raw_body()
+    }
+}
+
+impl DocMeta for Doc {
+    fn get_raw_meta<'a>(&'a self) -> Option<&'a [u8]> {
+        self.inner.get_raw_meta()
+    }
+
+    /// Sequence number assigned to the doc
+    #[inline(always)]
+    fn seq_num(&self) -> u64 {
+        self.inner.seq_num()
+    }
+
+    /// Is doc deleted?
+    #[inline(always)]
+    fn is_deleted(&self) -> bool {
+        self.inner.is_deleted()
+    }
+
+    /// Offset to the doc on disk
+    #[inline(always)]
+    fn offset(&self) -> u64 {
+        self.inner.offset()
+    }
+}
+
+pub struct Meta {
+    inner: InnerDoc
+}
+
+impl Meta {
+    fn with_inner(inner: InnerDoc) -> Meta {
+        Meta {inner: inner}
+    }
+
+    pub fn into_doc(self) -> Doc {
+        let tmp = self;
+        Doc::with_inner(tmp.inner)
+    }
+}
+
+impl DocKey for Meta {
+    fn get_raw_key<'a>(&'a self) -> Option<&'a [u8]> {
+        self.inner.get_raw_key()
+    }
+}
+
+impl DocMeta for Meta {
+    fn get_raw_meta<'a>(&'a self) -> Option<&'a [u8]> {
+        self.inner.get_raw_meta()
+    }
+
+    /// Sequence number assigned to the doc
+    #[inline(always)]
+    fn seq_num(&self) -> u64 {
+        self.inner.seq_num()
+    }
+
+    /// Is doc deleted?
+    #[inline(always)]
+    fn is_deleted(&self) -> bool {
+        self.inner.is_deleted()
+    }
+
+    /// Offset to the doc on disk
+    #[inline(always)]
+    fn offset(&self) -> u64 {
+        self.inner.offset()
+    }
+}
+
+
 
 #[allow(dead_code)]
 pub struct UnsafeDoc<'a> {
@@ -671,18 +834,15 @@ impl std::iter::Iterator for Iterator<Doc> {
     }
 }
 
-struct Meta;
-
 impl std::iter::Iterator for Iterator<Meta> {
     type Item = Meta;
 
     fn next(&mut self) -> Option<Meta> {
         match self.get_meta_only() {
             Err(_) => return None,
-            Ok(_doc) => {
+            Ok(meta) => {
                 let _ = self.to_next();
-                let m = Meta;
-                Some(m)
+                Some(meta)
             }
         }
     }
@@ -858,7 +1018,7 @@ impl<'a> UnsafeDoc<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FileHandle, Error, Location, Iterator, Doc, Meta, CommitOptions};
+    use super::{FileHandle, Error, Location, Iterator, Doc, CommitOptions, DocBody, DocMeta, DocKey};
 
     use std::sync::atomic::{AtomicUint, ATOMIC_UINT_INIT, Ordering};
     use std::default::Default;
@@ -1013,5 +1173,31 @@ mod tests {
 
         assert_eq!(doc1.offset(), doc2.offset());
         assert_eq!(doc2.offset(), doc3.offset());
+    }
+
+    #[test]
+    fn test_access_through_meta() {
+        let db = FileHandle::open(&next_db_path(), Default::default()).unwrap();
+        let store = db.get_default_store(Default::default()).unwrap();
+
+        let key = "key";
+        let value = "value";
+        assert!(store.set_value(&key.as_bytes(), &value.as_bytes()).is_ok());
+
+        let meta1 = store.get_meta(Location::with_key(&key.as_bytes())).unwrap();
+        let meta2 = store.get_meta(Location::SeqNum(meta1.seq_num())).unwrap();
+
+        assert_eq!(meta1.get_raw_key(), meta2.get_raw_key());
+
+        let mut doc = meta1.into_doc();
+        let new_value = "new_value";
+        assert!(doc.set_body(&new_value.as_bytes()).is_ok());
+
+        assert!(store.set_doc(&doc).is_ok());
+
+        let doc2 = store.get_doc(Location::SeqNum(doc.seq_num())).unwrap();
+        let v2: String = doc2.get_body().unwrap();
+
+        assert_eq!(v2.as_slice(), new_value);
     }
 }
