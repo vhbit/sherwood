@@ -228,8 +228,14 @@ impl ConfigBuilder {
     }
 
     /// Sets cache size
-    pub fn set_cache_size(mut self, size: u64) -> ConfigBuilder {
+    pub fn cache_size(mut self, size: u64) -> ConfigBuilder {
         self.raw.buffercache_size = size;
+        self
+    }
+
+    /// Sets WAL threshold
+    pub fn wal_threshold(mut self, size: u64) -> ConfigBuilder {
+        self.raw.wal_threshold = size;
         self
     }
 
