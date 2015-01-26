@@ -334,12 +334,6 @@ impl FileHandle {
     pub fn abort_transaction(&self) -> FdbResult<()> {
         lift_error!(unsafe {ffi::fdb_abort_transaction(self.raw)})
     }
-
-    /// Rollbacks file handle to specified seq num
-    pub fn rollback(&self, seq_num: u64) -> FdbResult<()> {
-        lift_error!(unsafe {ffi::fdb_rollback(mem::transmute(&self.raw),
-                                              seq_num)})
-    }
 }
 
 unsafe impl Send for FileHandle {}
@@ -606,6 +600,12 @@ impl KvHandle<ReadWrite> {
     /// Deletes the document specified by available meta
     pub fn del_meta(&self, meta: &Meta) -> FdbResult<()>  {
         self.del_inner_doc(&meta.inner)
+    }
+
+    /// Rollbacks kv handle to specified seq num
+    pub fn rollback(&self, seq_num: u64) -> FdbResult<()> {
+        lift_error!(unsafe {ffi::fdb_rollback(mem::transmute(&self.inner.raw),
+                                              seq_num)})
     }
 }
 
@@ -1284,5 +1284,54 @@ mod tests {
         let v2: String = doc2.get_body().unwrap();
 
         assert_eq!(v2.as_slice(), new_value);
+    }
+
+    #[test]
+    fn test_snapshot() {
+        let db = FileHandle::open(&next_db_path(), Default::default()).unwrap();
+        let store = db.get_default_store(Default::default()).unwrap();
+
+        let key = "key";
+        let old_value = "value";
+        let new_value = "new_value";
+
+        assert!(store.set_value(&key.as_bytes(), &old_value.as_bytes()).is_ok());
+        assert!(db.commit(CommitOptions::Normal).is_ok());
+
+        let seq_num = store.seq_num().unwrap();
+        let snapshot = store.snapshot(seq_num).unwrap();
+        assert!(store.set_value(&key.as_bytes(), &new_value.as_bytes()).is_ok());
+        assert!(db.commit(CommitOptions::Normal).is_ok());
+
+        let doc = snapshot.get_doc(Location::with_key(&key.as_bytes())).unwrap();
+        let v2: String = doc.get_body().unwrap();
+
+        assert_eq!(v2.as_slice(), old_value);
+    }
+
+    #[test]
+    fn test_rollback() {
+        let db = FileHandle::open(&next_db_path(), Default::default()).unwrap();
+        let store = db.get_default_store(Default::default()).unwrap();
+
+        let key = "key";
+        let old_value = "value";
+        let new_value = "new_value";
+
+        assert!(store.set_value(&key.as_bytes(), &old_value.as_bytes()).is_ok());
+        assert!(db.commit(CommitOptions::Normal).is_ok());
+
+        let seq_num = store.seq_num().unwrap();
+        assert!(store.set_value(&key.as_bytes(), &new_value.as_bytes()).is_ok());
+        assert!(db.commit(CommitOptions::Normal).is_ok());
+
+        let res = store.rollback(seq_num);
+        println!("res {:?}", res);
+        assert!(res.is_ok());
+
+        let doc = store.get_doc(Location::with_key(&key.as_bytes())).unwrap();
+        let v2: String = doc.get_body().unwrap();
+
+        assert_eq!(v2.as_slice(), old_value);
     }
 }
