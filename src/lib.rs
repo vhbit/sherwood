@@ -14,6 +14,7 @@ use std::mem;
 use std::ptr;
 use std::rc::Rc;
 use std::slice::from_raw_buf;
+use std::str;
 
 #[derive(Copy)]
 pub struct Error {code: i32}
@@ -340,6 +341,14 @@ impl FileHandle {
     pub fn abort_transaction(&self) -> FdbResult<()> {
         lift_error!(unsafe {ffi::fdb_abort_transaction(self.raw)})
     }
+
+    pub fn get_info(&self) -> FdbResult<FileHandleInfo> {
+        unsafe {
+            let mut info: ffi::fdb_file_info = mem::zeroed();
+            try_fdb!(ffi::fdb_get_file_info(self.raw, &mut info));
+            Ok(FileHandleInfo::from_raw(info))
+        }
+    }
 }
 
 unsafe impl Send for FileHandle {}
@@ -366,6 +375,42 @@ impl Drop for FileHandle {
 impl std::fmt::Show for FileHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.write_str(&format!("Database {{path: {}}}", self.path.display())[])
+    }
+}
+
+#[derive(Copy)]
+pub struct FileHandleInfo {
+    raw: ffi::fdb_file_info
+}
+
+impl FileHandleInfo {
+    fn from_raw(raw: ffi::fdb_file_info) -> FileHandleInfo {
+        FileHandleInfo {raw: raw}
+    }
+
+    #[inline]
+    fn file_size(&self) -> u64 {
+        self.raw.file_size
+    }
+
+    #[inline]
+    fn space_used(&self) -> u64 {
+        self.raw.space_used
+    }
+
+    #[inline]
+    fn filename<'a>(&'a self) -> &'a str {
+        unsafe {str::from_utf8_unchecked(std::ffi::c_str_to_bytes(&self.raw.filename))}
+    }
+
+    #[inline]
+    fn new_filename<'a>(&'a self) -> &'a str {
+        unsafe {str::from_utf8_unchecked(std::ffi::c_str_to_bytes(&self.raw.new_filename))}
+    }
+
+    #[inline]
+    fn doc_count(&self) -> u64 {
+        self.raw.doc_count
     }
 }
 
