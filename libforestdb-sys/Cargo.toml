@@ -11,3 +11,6 @@ build = "src/build.rs"
 [lib]
 name = "libforestdb-sys"
 path = "src/lib.rs"
+
+[dependencies]
+regex = "<= 0.1.10"
