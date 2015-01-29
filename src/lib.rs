@@ -240,6 +240,11 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn read_only(mut self) -> ConfigBuilder {
+        self.raw.flags = ffi::FDB_OPEN_FLAG_RDONLY;
+        self
+    }
+
     pub fn build(self) -> Config {
         let tmp = self;
         Config::from_raw(tmp.raw)
