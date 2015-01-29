@@ -383,33 +383,46 @@ pub struct FileHandleInfo {
     raw: ffi::fdb_file_info
 }
 
+/// Provides info for file handle
 impl FileHandleInfo {
     fn from_raw(raw: ffi::fdb_file_info) -> FileHandleInfo {
         FileHandleInfo {raw: raw}
     }
 
+    /// Returns total size occupied by db
     #[inline]
-    fn file_size(&self) -> u64 {
+    pub fn file_size(&self) -> u64 {
         self.raw.file_size
     }
 
+    /// Returns size occupied by live docs
     #[inline]
-    fn space_used(&self) -> u64 {
+    pub fn space_used(&self) -> u64 {
         self.raw.space_used
     }
 
+    /// Returns ratio of used_size/total_size
     #[inline]
-    fn filename<'a>(&'a self) -> &'a str {
+    pub fn usage_ratio(&self) -> f64 {
+        self.raw.space_used as f64 / self.raw.file_size as f64
+    }
+
+    /// Returns file name
+    #[inline]
+    pub fn filename<'a>(&'a self) -> &'a str {
         unsafe {str::from_utf8_unchecked(std::ffi::c_str_to_bytes(&self.raw.filename))}
     }
 
+    /// When compacting contains name for file
+    /// which it'll get after compaction
     #[inline]
-    fn new_filename<'a>(&'a self) -> &'a str {
+    pub fn new_filename<'a>(&'a self) -> &'a str {
         unsafe {str::from_utf8_unchecked(std::ffi::c_str_to_bytes(&self.raw.new_filename))}
     }
 
+    /// Number of live documents
     #[inline]
-    fn doc_count(&self) -> u64 {
+    pub fn doc_count(&self) -> u64 {
         self.raw.doc_count
     }
 }
