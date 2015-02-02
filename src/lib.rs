@@ -186,6 +186,22 @@ pub enum SeekOptions {
 }
 
 
+#[repr(u8)]
+#[derive(Copy)]
+/// Durability options
+pub enum Durability {
+    /// Synchronous commit through OS page cache.
+    Sync = ffi::FDB_DRB_NONE,
+    /// Synchronous commit through the direct IO option to bypass
+    /// the OS page cache.
+    DirectSync = ffi::FDB_DRB_ODIRECT,
+    /// Asynchronous commit through OS page cache.
+    Async = ffi::FDB_DRB_ASYNC,
+    /// Asynchronous commit through the direct IO option to bypass
+    /// the OS page cache.
+    DirectAsync = ffi::FDB_DRB_ODIRECT_ASYNC,
+}
+
 #[derive(Copy)]
 /// FileHandle configuration
 pub struct Config {
@@ -240,8 +256,14 @@ impl ConfigBuilder {
         self
     }
 
+    /// Opens file handle in read-only mode
     pub fn read_only(mut self) -> ConfigBuilder {
         self.raw.flags = ffi::FDB_OPEN_FLAG_RDONLY;
+        self
+    }
+
+    pub fn durability(mut self, durability: Durability) -> ConfigBuilder {
+        self.raw.durability_opt = durability as u8;
         self
     }
 
