@@ -698,6 +698,15 @@ impl KvHandle<ReadWrite> {
         lift_error!(unsafe {ffi::fdb_rollback(mem::transmute(&self.inner.raw),
                                               seq_num)})
     }
+
+    /// Clears KV store, i.e. deletes all docs
+    pub fn clear(&self) -> FdbResult<()> {
+        let mut iter: Iterator<Meta> = try!(self.key_iter(FullRange, true));
+        for meta in iter {
+            try!(self.del_meta(&meta));
+        }
+        Ok(())
+    }
 }
 
 impl<T> Clone for KvHandle<T> {
