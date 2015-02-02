@@ -45,32 +45,33 @@ pub const FDB_RESULT_INVALID_KV_INSTANCE_NAME: ::libc::c_int = -33;
 pub const FDB_RESULT_INVALID_CMP_FUNCTION: ::libc::c_int = -34;
 pub const FDB_RESULT_IN_USE_BY_COMPACTOR: ::libc::c_int = -35;
 pub type fdb_status = Enum_Unnamed1;
+
 pub type fdb_open_flags = u32;
-pub type Enum_Unnamed2 = ::libc::c_uint;
-pub const FDB_OPEN_FLAG_CREATE: ::libc::c_uint = 1;
-pub const FDB_OPEN_FLAG_RDONLY: ::libc::c_uint = 2;
+pub const FDB_OPEN_FLAG_CREATE: fdb_open_flags = 1;
+pub const FDB_OPEN_FLAG_RDONLY: fdb_open_flags = 2;
+
 pub type fdb_commit_opt_t = u8;
-pub type Enum_Unnamed3 = ::libc::c_uint;
-pub const FDB_COMMIT_NORMAL: ::libc::c_uint = 0;
-pub const FDB_COMMIT_MANUAL_WAL_FLUSH: ::libc::c_uint = 1;
+pub const FDB_COMMIT_NORMAL: fdb_commit_opt_t = 0;
+pub const FDB_COMMIT_MANUAL_WAL_FLUSH: fdb_commit_opt_t = 1;
+
 pub type fdb_seqtree_opt_t = u8;
-pub type Enum_Unnamed4 = ::libc::c_uint;
-pub const FDB_SEQTREE_NOT_USE: ::libc::c_uint = 0;
-pub const FDB_SEQTREE_USE: ::libc::c_uint = 1;
+pub const FDB_SEQTREE_NOT_USE: fdb_seqtree_opt_t = 0;
+pub const FDB_SEQTREE_USE: fdb_seqtree_opt_t = 1;
+
 pub type fdb_durability_opt_t = u8;
-pub type Enum_Unnamed5 = ::libc::c_uint;
-pub const FDB_DRB_NONE: ::libc::c_uint = 0;
-pub const FDB_DRB_ODIRECT: ::libc::c_uint = 1;
-pub const FDB_DRB_ASYNC: ::libc::c_uint = 2;
-pub const FDB_DRB_ODIRECT_ASYNC: ::libc::c_uint = 3;
+pub const FDB_DRB_NONE: fdb_durability_opt_t = 0;
+pub const FDB_DRB_ODIRECT: fdb_durability_opt_t = 1;
+pub const FDB_DRB_ASYNC: fdb_durability_opt_t = 2;
+pub const FDB_DRB_ODIRECT_ASYNC: fdb_durability_opt_t = 3;
+
 pub type fdb_compaction_mode_t = u8;
-pub type Enum_Unnamed6 = ::libc::c_uint;
-pub const FDB_COMPACTION_MANUAL: ::libc::c_uint = 0;
-pub const FDB_COMPACTION_AUTO: ::libc::c_uint = 1;
+pub const FDB_COMPACTION_MANUAL: fdb_compaction_mode_t = 0;
+pub const FDB_COMPACTION_AUTO: fdb_compaction_mode_t = 1;
+
 pub type fdb_isolation_level_t = u8;
-pub type Enum_Unnamed7 = ::libc::c_uint;
-pub const FDB_ISOLATION_READ_COMMITTED: ::libc::c_uint = 2;
-pub const FDB_ISOLATION_READ_UNCOMMITTED: ::libc::c_uint = 3;
+pub const FDB_ISOLATION_READ_COMMITTED: fdb_isolation_level_t = 2;
+pub const FDB_ISOLATION_READ_UNCOMMITTED: fdb_isolation_level_t = 3;
+
 pub type fdb_custom_cmp_fixed =
     ::std::option::Option<extern "C" fn
                               (a: *mut ::libc::c_void, b: *mut ::libc::c_void)
