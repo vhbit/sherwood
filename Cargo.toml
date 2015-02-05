@@ -5,6 +5,7 @@ authors = ["Valerii Hiora <valerii.hiora@gmail.com>"]
 license = "MIT"
 description = "ForestDB bindings"
 repository = "https://github.com/vhbit/sherwood"
+documentation = "http://vhbit.github.io/sherwood/sherwood"
 keywords = ["db", "database", "key-value", "forestdb", "kvs"]
 
 [dependencies.libforestdb-sys]
