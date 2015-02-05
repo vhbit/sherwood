@@ -267,6 +267,15 @@ impl ConfigBuilder {
         self
     }
 
+    pub fn chunk_size(mut self, size: u16) -> ConfigBuilder {
+        self.raw.chunksize = size;
+        self
+    }
+    pub fn block_size(mut self, size: u32) -> ConfigBuilder {
+        self.raw.blocksize = size;
+        self
+    }
+
     pub fn build(self) -> Config {
         let tmp = self;
         Config::from_raw(tmp.raw)
