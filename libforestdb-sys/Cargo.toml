@@ -1,6 +1,6 @@
 [package]
 name = "libforestdb-sys"
-version = "0.0.1"
+version = "0.1.0"
 authors = ["Valerii Hiora <valerii.hiora@gmail.com>"]
 links = "forestdb"
 license = "MIT"
@@ -8,9 +8,5 @@ description = "ForestDB native lib"
 repository = "https://github.com/vhbit/sherwood"
 build = "src/build.rs"
 
-[lib]
-name = "libforestdb-sys"
-path = "src/lib.rs"
-
 [dependencies]
-regex = "<= 0.1.10"
+regex = "= 0.1.10"

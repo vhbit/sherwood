@@ -1,6 +1,6 @@
 [package]
 name = "sherwood"
-version = "0.0.1"
+version = "0.1.0"
 authors = ["Valerii Hiora <valerii.hiora@gmail.com>"]
 license = "MIT"
 description = "ForestDB bindings"
@@ -12,5 +12,5 @@ path = "libforestdb-sys"
 
 [dependencies]
 bitflags = "0.1"
-log = "<= 0.1.9"
-regex = "<= 0.1.10"
+log = "= 0.1.9"
+regex = "= 0.1.10"
