@@ -1,3 +1,10 @@
 language: rust
 sudo: false
 rust: 1.0.0-alpha
+
+env:
+  global:
+    - secure: ebLtzoxAWnGLcXAWpTmW3IxN+7Al2Lq7vx3lgQ2jZB32j/3CAzsq0fuOBiDz59eX5gGwfKipfUSHgzd1tloFg44j30cZM7Lw4rqPcwCXcvKoIz8nvoMAYAvHkPz/Y9XLKA0C9Au8oJickasTOXS47QLTakUjkJeYAgjLZuoZgqI=
+
+after_script:
+  - cargo doc --no-deps && ./up_doc.sh  
