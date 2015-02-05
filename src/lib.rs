@@ -245,12 +245,15 @@ impl ConfigBuilder {
     }
 
     /// Sets cache size
+    /// 0 to disable cache at all
+    /// Global for all file handles
     pub fn cache_size(mut self, size: u64) -> ConfigBuilder {
         self.raw.buffercache_size = size;
         self
     }
 
     /// Sets WAL threshold
+    /// Local to file handle
     pub fn wal_threshold(mut self, size: u64) -> ConfigBuilder {
         self.raw.wal_threshold = size;
         self
@@ -262,15 +265,24 @@ impl ConfigBuilder {
         self
     }
 
+    /// Change durability options
+    /// Local to file handle
     pub fn durability(mut self, durability: Durability) -> ConfigBuilder {
         self.raw.durability_opt = durability as u8;
         self
     }
 
+    /// Chunk size that is used to build B+-tree at each level
+    /// Default 8 bytes, min 4 bytes, max 64 bytes
+    /// Local to file handle
     pub fn chunk_size(mut self, size: u16) -> ConfigBuilder {
         self.raw.chunksize = size;
         self
     }
+
+    /// Size of block that is a unit of IO operations.
+    /// Default 4Kb, min 1Kb max 128Kb.
+    /// Global across all files
     pub fn block_size(mut self, size: u32) -> ConfigBuilder {
         self.raw.blocksize = size;
         self
