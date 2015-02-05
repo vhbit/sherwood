@@ -17,6 +17,7 @@ use std::slice::from_raw_buf;
 use std::str;
 
 #[derive(Copy)]
+/// ForestDB error
 pub struct Error {code: i32}
 
 impl Error {
@@ -45,6 +46,7 @@ impl std::fmt::Show for Error {
     }
 }
 
+/// Trait which allows to create custom key range iterators
 pub trait KeyRange {
     fn min_key<'a>(&'a self) -> Option<&'a [u8]>;
     fn max_key<'a>(&'a self) -> Option<&'a [u8]>;
@@ -53,6 +55,7 @@ pub trait KeyRange {
     }
 }
 
+/// Trait which allows to create custom seq num iterators
 pub trait SeqRange {
     fn min_seq(&self) -> u64;
     fn max_seq(&self) -> u64;
@@ -110,10 +113,12 @@ pub trait DocMeta {
     fn offset(&self) -> u64;
 }
 
+/// Trait to convert value from a byte slice to a corresponding type
 pub trait FromBytes {
     fn from_bytes(bytes: &[u8]) -> Option<Self>;
 }
 
+/// ForestDB result
 pub type FdbResult<T> = Result<T, Error>;
 
 macro_rules! lift_error {
@@ -161,7 +166,9 @@ pub enum IsolationLevel {
 }
 
 bitflags!{
+    #[doc="Iterator options"]
     flags IteratorOptions: u16 {
+        #[doc="Empty flags for iterator"]
         const NONE = ffi::FDB_ITR_NONE,
         #[doc="Skip deleted documents"]
         const NO_DELETES = ffi::FDB_ITR_NO_DELETES,
@@ -233,6 +240,7 @@ impl Default for Config {
 }
 
 #[allow(missing_copy_implementations)]
+/// Builds configuration for a file handle
 pub struct ConfigBuilder {
     raw: ffi::fdb_config
 }
@@ -305,7 +313,7 @@ pub fn shutdown() -> Result<(), Error> {
     lift_error!(unsafe {ffi::fdb_shutdown()})
 }
 
-/// Represents ForestDB file handle
+/// ForestDB file handle
 pub struct FileHandle {
     path: Path,
     config: Config,
@@ -415,7 +423,6 @@ impl Clone for FileHandle {
 
 impl Drop for FileHandle {
     fn drop(&mut self) {
-        debug!("Dropping");
         unsafe { ffi::fdb_close(self.raw); }
     }
 }
@@ -427,11 +434,11 @@ impl std::fmt::Show for FileHandle {
 }
 
 #[derive(Copy)]
+/// Provides stats for file handle
 pub struct FileHandleInfo {
     raw: ffi::fdb_file_info
 }
 
-/// Provides info for file handle
 impl FileHandleInfo {
     fn from_raw(raw: ffi::fdb_file_info) -> FileHandleInfo {
         FileHandleInfo {raw: raw}
@@ -511,11 +518,14 @@ impl Drop for InnerKvHandle {
 
 
 #[allow(missing_copy_implementations)]
+#[doc(hidden)]
 pub enum ReadOnly {}
+
 #[allow(missing_copy_implementations)]
+#[doc(hidden)]
 pub enum ReadWrite {}
 
-/// Represents ForestDB key value store
+/// ForestDB key value store
 pub struct KvHandle<T> {
     inner: Rc<InnerKvHandle>
 }
@@ -736,9 +746,13 @@ impl<T> Clone for KvHandle<T> {
     }
 }
 
+/// Read-write key-value  handle
 pub type Store = KvHandle<ReadWrite>;
+
+/// Read-only key-value handle
 pub type Snapshot = KvHandle<ReadOnly>;
 
+/// Iterator over key-value store
 pub struct Iterator<T> {
     raw: *mut ffi::fdb_iterator,
 }
@@ -908,7 +922,7 @@ impl Drop for InnerDoc {
     }
 }
 
-/// Represents a document which was fully
+/// Document which was fully
 /// retrieved from db
 pub struct Doc {
     inner: InnerDoc
@@ -970,8 +984,8 @@ impl DocMeta for Doc {
     }
 }
 
-/// Represents a document for which only meta
-/// was retrieved - it's key, seq_num, offset and meta itself
+/// Meta information about a document
+/// key, seq_num, offset and meta itself
 pub struct Meta {
     inner: InnerDoc
 }
