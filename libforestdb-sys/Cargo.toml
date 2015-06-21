@@ -8,5 +8,9 @@ description = "ForestDB native lib"
 repository = "https://github.com/vhbit/sherwood"
 build = "src/build.rs"
 
+[lib]
+name = "libforestdb_sys"
+path = "src/lib.rs"
+
 [dependencies]
-regex = "= 0.1.10"
+libc = "0.1.8"

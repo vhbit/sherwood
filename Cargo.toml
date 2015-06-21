@@ -13,5 +13,6 @@ path = "libforestdb-sys"
 
 [dependencies]
 bitflags = "0.1"
-log = "= 0.1.9"
-regex = "= 0.1.10"
+#regex = "= 0.1.10"
+log = "0.3"
+libc = "0.1.8"

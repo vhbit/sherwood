@@ -1,23 +1,23 @@
-#![allow(unstable)]
-#![feature(unsafe_destructor)]
-
 extern crate libc;
-extern crate "libforestdb-sys" as ffi;
+extern crate libforestdb_sys as ffi;
 
 #[macro_use] extern crate bitflags;
 #[macro_use] extern crate log;
 
 use std::default::Default;
 use std::error;
-use std::ffi::{CString, c_str_to_bytes};
+use std::ffi::{CString, CStr};
 use std::mem;
+use std::ops::{RangeFull};
+use std::path::{Path,PathBuf};
 use std::ptr;
 use std::rc::Rc;
-use std::slice::from_raw_buf;
+use std::slice::from_raw_parts;
 use std::str;
+use std::os::unix::ffi::OsStrExt;
 
-#[derive(Copy)]
 /// ForestDB error
+#[derive(Copy, Clone)]
 pub struct Error {code: i32}
 
 impl Error {
@@ -28,21 +28,28 @@ impl Error {
     pub fn is_not_found(self) -> bool {
         self.code == ffi::FDB_RESULT_KEY_NOT_FOUND
     }
+
+    fn detail(&self) -> Option<String> {
+        let c_str = unsafe{CStr::from_ptr(ffi::fdb_error_msg(self.code))};
+        String::from_utf8(c_str.to_bytes().to_owned()).ok()
+    }
 }
 
 impl error::Error for Error {
     fn description(&self) -> &str {
         "ForestDB error"
     }
+}
 
-    fn detail(&self) -> Option<String> {
-        unsafe { String::from_utf8(c_str_to_bytes(&ffi::fdb_error_msg(self.code)).to_vec()).ok() }
+impl std::fmt::Debug for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str(&format!("fdb error: {:?}", self.detail())[..])
     }
 }
 
-impl std::fmt::Show for Error {
+impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str(&format!("fdb error: {:?}", (self as &error::Error).detail())[])
+        f.write_str(&format!("fdb error: {:?}", self.detail())[..])
     }
 }
 
@@ -79,10 +86,10 @@ pub trait DocKey {
 /// Trait for accessing document body
 pub trait DocBody {
     /// Sets document body, data is copied
-    fn set_body<B>(&mut self, body: &B) -> FdbResult<()> where B: AsSlice<u8>;
+    fn set_body<B>(&mut self, body: &B) -> FdbResult<()> where B: AsRef<[u8]>;
 
     /// Sets document meta, data is copied
-    fn set_meta<M>(&mut self, meta: &M) -> FdbResult<()> where M: AsSlice<u8>;
+    fn set_meta<M>(&mut self, meta: &M) -> FdbResult<()> where M: AsRef<[u8]>;
 
     /// Retrieves body as raw bytes
     fn get_raw_body<'a>(&'a self) -> Option<&'a [u8]>;
@@ -143,7 +150,7 @@ macro_rules! try_fdb {
 }
 
 #[repr(u8)]
-#[derive(Copy)]
+#[derive(Copy, Clone)]
 /// Commit options
 pub enum CommitOptions {
     /// Commit normally
@@ -153,7 +160,7 @@ pub enum CommitOptions {
 }
 
 #[repr(u8)]
-#[derive(Copy)]
+#[derive(Copy, Clone)]
 /// Transaction isolation level
 pub enum IsolationLevel {
     // Serializable = 0, // unsupported yet
@@ -180,7 +187,7 @@ bitflags!{
 }
 
 #[repr(u8)]
-#[derive(Copy)]
+#[derive(Copy, Clone)]
 /// Specifies behavior of iterator if requested key
 /// is not found
 pub enum SeekOptions {
@@ -194,7 +201,7 @@ pub enum SeekOptions {
 
 
 #[repr(u8)]
-#[derive(Copy)]
+#[derive(Copy, Clone)]
 /// Durability options
 pub enum Durability {
     /// Synchronous commit through OS page cache.
@@ -209,7 +216,7 @@ pub enum Durability {
     DirectAsync = ffi::FDB_DRB_ODIRECT_ASYNC,
 }
 
-#[derive(Copy)]
+#[derive(Copy, Clone)]
 /// FileHandle configuration
 pub struct Config {
     raw: ffi::fdb_config
@@ -315,7 +322,7 @@ pub fn shutdown() -> Result<(), Error> {
 
 /// ForestDB file handle
 pub struct FileHandle {
-    path: Path,
+    path: PathBuf,
     config: Config,
     raw: *mut ffi::fdb_file_handle,
 }
@@ -324,18 +331,23 @@ impl FileHandle {
     fn from_raw(handle: *mut ffi::fdb_file_handle, path: &Path, config: Config) -> FileHandle {
         FileHandle {
             raw: handle,
-            path: path.clone(),
+            path: path.to_owned(),
             config: config
         }
     }
 
     /// Opens database with specified config
     pub fn open(path: &Path, config: Config) -> FdbResult<FileHandle> {
+        use std::os::unix::ffi::OsStrExt;
+
         let mut handle: *mut ffi::fdb_file_handle = ptr::null_mut();
-        let c_path = CString::from_slice(path.as_vec());
+        let c_path = CString::new(path.to_str().expect("valid path"));
+        let c_path: CString = c_path.unwrap();
+        //let c_path = c_path.ok().expect("can't convert path to cstring");
 
         try_fdb!(unsafe { ffi::fdb_open(mem::transmute(&mut handle),
-                                        c_path.as_ptr(),
+                                        mem::transmute(c_path.as_bytes().as_ptr()),
+                                        //(*c_path).as_ptr(),
                                         mem::transmute(&config.raw)) });
         let res = FileHandle::from_raw(handle, path, config);
         Ok(res)
@@ -348,7 +360,7 @@ impl FileHandle {
 
     /// Retrieves store by name
     pub fn get_store(&self, name: &str, config: StoreConfig) -> FdbResult<KvHandle<ReadWrite>> {
-        let c_name = CString::from_slice(name.as_bytes());
+        let c_name = CString::new(name.as_bytes()).ok().expect("invalid name in get_store");
         self._get_store(Some(c_name), config)
     }
 
@@ -369,12 +381,12 @@ impl FileHandle {
 
     /// Writes compacted database to new_path. If it is set to None - it'll be in-place
     /// compaction
-    pub fn compact(&self, new_path: Option<Path>) -> FdbResult<()> {
+    pub fn compact(&self, new_path: Option<PathBuf>) -> FdbResult<()> {
         lift_error!(unsafe {ffi::fdb_compact(self.raw,
                                              if new_path.is_none() {
                                                  ptr::null_mut()
                                              } else {
-                                                 CString::from_slice(new_path.unwrap().as_vec()).as_ptr()
+                                                 CString::new(new_path.unwrap().to_str().unwrap()).ok().expect("invalid path for compaction").as_ptr()
                                              })})
     }
 
@@ -427,14 +439,14 @@ impl Drop for FileHandle {
     }
 }
 
-impl std::fmt::Show for FileHandle {
+impl std::fmt::Display for FileHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str(&format!("Database {{path: {}}}", self.path.display())[])
+        f.write_str(&format!("Database {{path: {}}}", self.path.display())[..])
     }
 }
 
-#[derive(Copy)]
 /// Provides stats for file handle
+#[derive(Copy,Clone)]
 pub struct FileHandleInfo {
     raw: ffi::fdb_file_info
 }
@@ -464,15 +476,19 @@ impl FileHandleInfo {
 
     /// Returns file name
     #[inline]
-    pub fn filename<'a>(&'a self) -> &'a str {
-        unsafe {str::from_utf8_unchecked(std::ffi::c_str_to_bytes(&self.raw.filename))}
+    #[allow(dead_code)]
+    fn filename<'a>(&'a self) -> String {
+        let c_str = unsafe {CStr::from_ptr(self.raw.filename)};
+        str::from_utf8(c_str.to_bytes()).ok().expect("invalid utf8 in filename").to_owned()
     }
 
     /// When compacting contains name for file
     /// which it'll get after compaction
     #[inline]
-    pub fn new_filename<'a>(&'a self) -> &'a str {
-        unsafe {str::from_utf8_unchecked(std::ffi::c_str_to_bytes(&self.raw.new_filename))}
+    #[allow(dead_code)]
+    fn new_filename<'a>(&'a self) -> String {
+        let c_str = unsafe {CStr::from_ptr(self.raw.new_filename)};
+        str::from_utf8(c_str.to_bytes()).ok().expect("invalid utf8 in new filename").to_owned()
     }
 
     /// Number of live documents
@@ -482,7 +498,7 @@ impl FileHandleInfo {
     }
 }
 
-#[derive(Copy)]
+#[derive(Copy,Clone)]
 /// Configuration of KvHandle
 pub struct StoreConfig {
     raw: ffi::fdb_kvs_config
@@ -527,26 +543,28 @@ pub enum ReadWrite {}
 
 /// ForestDB key value store
 pub struct KvHandle<T> {
-    inner: Rc<InnerKvHandle>
+    inner: Rc<InnerKvHandle>,
+    marker: std::marker::PhantomData<T>,
 }
 
 impl<Access> KvHandle<Access> {
     fn from_raw(raw: *mut ffi::fdb_kvs_handle) -> KvHandle<Access> {
         KvHandle {
             inner: Rc::new(InnerKvHandle::from_raw(raw)),
+            marker: std::marker::PhantomData,
         }
     }
 
     /// Sets a value for key (plain KV mode)
-    pub fn get_value<K>(&self, key: &K) -> FdbResult<Vec<u8>> where K: AsSlice<u8> {
+    pub fn get_value<K>(&self, key: &K) -> FdbResult<Vec<u8>> where K: AsRef<[u8]> {
         let doc = try!(InnerDoc::with_key(key));
 
         try_fdb!(unsafe {
             ffi::fdb_get(self.inner.raw, doc.raw)
         });
         Ok(unsafe {
-            Vec::from_raw_buf(mem::transmute((*doc.raw).body),
-                              (*doc.raw).bodylen as usize)
+            from_raw_parts(mem::transmute((*doc.raw).body),
+                           (*doc.raw).bodylen as usize).to_vec()
         })
     }
 
@@ -678,8 +696,8 @@ impl<Access> KvHandle<Access> {
 impl KvHandle<ReadWrite> {
     /// Retrieves a value by key (plain KV mode)
     pub fn set_value<K, V>(&self, key: &K, value: &V) -> FdbResult<()>
-        where K: AsSlice<u8>,
-              V: AsSlice<u8>
+        where K: AsRef<[u8]>,
+              V: AsRef<[u8]>
     {
         let mut doc = try!(InnerDoc::with_key(key));
         try!(doc.set_body(value));
@@ -688,7 +706,7 @@ impl KvHandle<ReadWrite> {
 
     /// Deletes a value by key (plain KV mode)
     pub fn del_value<K>(&self, key: &K) -> FdbResult<()>
-        where K: AsSlice<u8>
+        where K: AsRef<[u8]>
     {
         let doc = try!(InnerDoc::with_key(key));
         self.del_inner_doc(&doc)
@@ -732,7 +750,7 @@ impl KvHandle<ReadWrite> {
 
     /// Clears KV store, i.e. deletes all docs
     pub fn clear(&self) -> FdbResult<()> {
-        let mut iter: Iterator<Meta> = try!(self.key_iter(FullRange, true));
+        let iter: Iterator<Meta> = try!(self.key_iter(RangeFull, true));
         for meta in iter {
             try!(self.del_meta(&meta));
         }
@@ -742,7 +760,7 @@ impl KvHandle<ReadWrite> {
 
 impl<T> Clone for KvHandle<T> {
     fn clone(&self) -> KvHandle<T> {
-        KvHandle {inner: self.inner.clone()}
+        KvHandle {inner: self.inner.clone(), marker: std::marker::PhantomData}
     }
 }
 
@@ -755,11 +773,12 @@ pub type Snapshot = KvHandle<ReadOnly>;
 /// Iterator over key-value store
 pub struct Iterator<T> {
     raw: *mut ffi::fdb_iterator,
+    marker: std::marker::PhantomData<T>,
 }
 
 impl<T> Iterator<T> {
     fn from_raw(raw: *mut ffi::fdb_iterator) -> Iterator<T> {
-        Iterator { raw: raw }
+        Iterator { raw: raw, marker: std::marker::PhantomData }
     }
 
     /// Moves to next key
@@ -798,15 +817,14 @@ impl<T> Iterator<T> {
 
     /// Moves to specified key, uses options to determine what to do
     /// if key wasn't found
-    pub fn to_key<K>(&self, key: &K, options: SeekOptions) -> FdbResult<()> where K: AsSlice<u8> {
-        let key = key.as_slice();
+    pub fn to_key<K>(&self, key: &K, options: SeekOptions) -> FdbResult<()> where K: AsRef<[u8]> {
+        let key = key.as_ref();
         lift_error!(unsafe {ffi::fdb_iterator_seek(self.raw,
                                                    mem::transmute(key.as_ptr()), key.len() as libc::size_t,
                                                    options as ffi::fdb_iterator_seek_opt_t)})
     }
 }
 
-#[unsafe_destructor]
 impl<T> Drop for Iterator<T> {
     fn drop(&mut self) {
         unsafe {ffi::fdb_iterator_close(self.raw)};
@@ -825,8 +843,8 @@ pub enum Location<'a> {
 }
 
 impl<'a> Location<'a> {
-    pub fn with_key<'k, K>(key: &'k K) -> Location<'k> where K: AsSlice<u8> {
-        Location::Key(key.as_slice())
+    pub fn with_key<'k, K>(key: &'k K) -> Location<'k> where K: AsRef<[u8]> {
+        Location::Key(key.as_ref())
     }
 }
 
@@ -839,9 +857,9 @@ impl InnerDoc {
         InnerDoc {raw: handle}
     }
 
-    fn with_key<K>(key: &K) -> FdbResult<InnerDoc> where K: AsSlice<u8> {
+    fn with_key<K>(key: &K) -> FdbResult<InnerDoc> where K: AsRef<[u8]> {
         let mut handle: *mut ffi::fdb_doc = ptr::null_mut();
-        let key = key.as_slice();
+        let key = key.as_ref();
         try_fdb!(unsafe {ffi::fdb_doc_create(&mut handle,
                                              mem::transmute(key.as_ptr()), key.len() as libc::size_t,
                                              ptr::null(), 0,
@@ -849,16 +867,16 @@ impl InnerDoc {
         Ok(InnerDoc::from_raw(handle))
     }
 
-    fn set_body<B>(&mut self, body: &B) -> FdbResult<()> where B: AsSlice<u8> {
-        let body = body.as_slice();
+    fn set_body<B>(&mut self, body: &B) -> FdbResult<()> where B: AsRef<[u8]> {
+        let body = body.as_ref();
         lift_error!(unsafe {ffi::fdb_doc_update(&mut self.raw,
                                                 ptr::null(), 0,
                                                 mem::transmute(body.as_ptr()), body.len() as libc::size_t)
         })
     }
 
-    fn set_meta<M>(&mut self, meta: &M) -> FdbResult<()> where M: AsSlice<u8> {
-        let meta = meta.as_slice();
+    fn set_meta<M>(&mut self, meta: &M) -> FdbResult<()> where M: AsRef<[u8]> {
+        let meta = meta.as_ref();
         lift_error!(unsafe {ffi::fdb_doc_update(&mut self.raw,
                                                 mem::transmute(meta.as_ptr()), meta.len() as libc::size_t,
                                                 ptr::null(), 0)
@@ -869,7 +887,7 @@ impl InnerDoc {
         if part == ptr::null_mut() {
             None
         } else {
-            Some(from_raw_buf(mem::transmute(&part), len as usize))
+            Some(from_raw_parts(mem::transmute(part), len as usize))
         }
     }
 
@@ -934,7 +952,7 @@ impl Doc {
     }
 
     /// Create a new document with specified key
-    pub fn with_key<K>(key: &K) -> FdbResult<Doc> where K: AsSlice<u8> {
+    pub fn with_key<K>(key: &K) -> FdbResult<Doc> where K: AsRef<[u8]> {
         let inner = try!(InnerDoc::with_key(key));
         Ok(Doc::with_inner(inner))
     }
@@ -947,11 +965,11 @@ impl DocKey for Doc {
 }
 
 impl DocBody for Doc {
-    fn set_body<B>(&mut self, body: &B) -> FdbResult<()> where B: AsSlice<u8> {
+    fn set_body<B>(&mut self, body: &B) -> FdbResult<()> where B: AsRef<[u8]> {
         self.inner.set_body(body)
     }
 
-    fn set_meta<M>(&mut self, meta: &M) -> FdbResult<()> where M: AsSlice<u8> {
+    fn set_meta<M>(&mut self, meta: &M) -> FdbResult<()> where M: AsRef<[u8]> {
         self.inner.set_meta(meta)
     }
 
@@ -1035,6 +1053,7 @@ impl DocMeta for Meta {
 #[allow(dead_code)]
 struct UnsafeDoc<'a> {
     raw: ffi::fdb_doc,
+    marker: std::marker::PhantomData<&'a u8>
 }
 
 impl std::iter::Iterator for Iterator<Doc> {
@@ -1074,7 +1093,7 @@ impl std::iter::Iterator for Iterator<Meta> {
 }
 
 
-impl KeyRange for FullRange {
+impl KeyRange for RangeFull {
     fn min_key(&self) -> Option<&[u8]> {
         None
     }
@@ -1084,13 +1103,13 @@ impl KeyRange for FullRange {
     }
 }
 
-impl<T: AsSlice<u8>> KeyRange for std::ops::Range<T> {
+impl<T: AsRef<[u8]>> KeyRange for std::ops::Range<T> {
     fn min_key(&self) -> Option<&[u8]> {
-        Some(self.start.as_slice())
+        Some(self.start.as_ref())
     }
 
     fn max_key(&self) -> Option<&[u8]> {
-        Some(self.end.as_slice())
+        Some(self.end.as_ref())
     }
 
     fn options(&self) -> IteratorOptions {
@@ -1098,9 +1117,9 @@ impl<T: AsSlice<u8>> KeyRange for std::ops::Range<T> {
     }
 }
 
-impl<T: AsSlice<u8>> KeyRange for std::ops::RangeFrom<T> {
+impl<T: AsRef<[u8]>> KeyRange for std::ops::RangeFrom<T> {
     fn min_key(&self) -> Option<&[u8]> {
-        Some(self.start.as_slice())
+        Some(self.start.as_ref())
     }
 
     fn max_key(&self) -> Option<&[u8]> {
@@ -1109,17 +1128,17 @@ impl<T: AsSlice<u8>> KeyRange for std::ops::RangeFrom<T> {
 }
 
 
-impl<T: AsSlice<u8>> KeyRange for std::ops::RangeTo<T> {
+impl<T: AsRef<[u8]>> KeyRange for std::ops::RangeTo<T> {
     fn min_key(&self) -> Option<&[u8]> {
         None
     }
 
     fn max_key(&self) -> Option<&[u8]> {
-        Some(self.end.as_slice())
+        Some(self.end.as_ref())
     }
 }
 
-impl SeqRange for FullRange {
+impl SeqRange for RangeFull {
     fn min_seq(&self) -> u64 {
         0
     }
@@ -1219,8 +1238,10 @@ impl<'a> UnsafeDoc<'a> {
             raw: ffi::fdb_doc {
                 key: unsafe { mem::transmute(key.as_ptr()) },
                 keylen: key.len() as libc::size_t,
+
                 .. empty_doc()
-            }
+            },
+            marker: std::marker::PhantomData
         }
     }
 
@@ -1232,7 +1253,8 @@ impl<'a> UnsafeDoc<'a> {
                 body: unsafe { mem::transmute(value.as_ptr()) },
                 bodylen: value.len() as libc::size_t,
                 .. empty_doc()
-            }
+            },
+            marker: std::marker::PhantomData
         }
     }
 }
@@ -1241,29 +1263,32 @@ impl<'a> UnsafeDoc<'a> {
 mod tests {
     use super::{FileHandle, Error, Location, Iterator, Doc, CommitOptions, DocBody, DocMeta, DocKey};
 
-    use std::sync::atomic::{AtomicUint, ATOMIC_UINT_INIT, Ordering};
+    use std::sync::atomic::{AtomicUsize, ATOMIC_USIZE_INIT, Ordering};
     use std::default::Default;
-    use std::error;
-    use std::io::{self, USER_DIR};
-    use std::io::fs::PathExtensions;
-    use std::os;
+    use std::env;
+    use std::fs;
+    use std::ops::RangeFull;
+    use std::path::{PathBuf};
     use std::sync::{Once, ONCE_INIT};
-    use std::thread::Thread;
+    use std::thread;
+
+    use std::iter::Iterator as StdIterator;
 
     use ffi;
 
-    fn next_db_path() -> Path {
-        static NEXT_TEST: AtomicUint = ATOMIC_UINT_INIT;
+    fn next_db_path() -> PathBuf {
+        static NEXT_TEST: AtomicUsize = ATOMIC_USIZE_INIT;
         static CLEAR_DIR_ONCE: Once = ONCE_INIT;
         let cur_test = NEXT_TEST.fetch_add(1, Ordering::SeqCst);
-        let db_dir = os::self_exe_path().unwrap().join("db_tests");
+        let db_dir = env::current_exe().unwrap().parent().unwrap().join("db_tests");
+        println!("creating {:?}", db_dir);
 
         CLEAR_DIR_ONCE.call_once(|| {
-            if db_dir.exists() {
-                assert!(io::fs::rmdir_recursive(&db_dir).is_ok());
+            if fs::metadata(&db_dir).is_ok() {
+                assert!(fs::remove_dir_all(&db_dir).is_ok());
             }
 
-            assert!(io::fs::mkdir(&db_dir, USER_DIR).is_ok());
+            assert!(fs::create_dir(&db_dir).is_ok());
         });
 
         println!("db is {}", cur_test);
@@ -1273,7 +1298,7 @@ mod tests {
     #[test]
     fn test_error_msg(){
         let err = Error::from_code(ffi::FDB_RESULT_OPEN_FAIL);
-        assert_eq!("error opening file", (&err as &error::Error).detail().unwrap().as_slice());
+        assert_eq!("error opening file", err.detail().unwrap());
     }
 
     #[test]
@@ -1291,10 +1316,10 @@ mod tests {
         assert!(store.set_value(&"hello".as_bytes(), &"world".as_bytes()).is_ok());
         assert!(db1.commit(CommitOptions::Normal).is_ok());
 
-        let _ = Thread::scoped(move || {
+        let _ = thread::spawn(move || {
             let store = db2.get_default_store(Default::default()).unwrap();
             let value = store.get_value(&"hello".as_bytes()).unwrap();
-            assert_eq!("world".as_bytes(), value);
+            assert_eq!(&"world".as_bytes()[..], &value[..]);
         }).join();
     }
 
@@ -1321,7 +1346,7 @@ mod tests {
         assert!(store.get_value(&"hello".as_bytes()).is_err());
         assert!(store.set_value(&"hello".as_bytes(), &"world".as_bytes()).is_ok());
         let value = store.get_value(&"hello".as_bytes()).unwrap();
-        assert_eq!(value.as_slice(), "world".as_bytes());
+        assert_eq!(&value[..], "world".as_bytes());
     }
 
     #[test]
@@ -1336,13 +1361,13 @@ mod tests {
 
         assert!(db.commit(CommitOptions::Normal).is_ok());
 
-        let iter: Iterator<Doc> = store.key_iter(FullRange, false).unwrap();
+        let iter: Iterator<Doc> = store.key_iter(RangeFull, false).unwrap();
         let values: Vec<_> = iter.map(|doc| doc.get_body::<String>().unwrap()).collect();
         assert_eq!(values, keys);
 
         let sub_iter: Iterator<Doc> = store.key_iter("b".as_bytes().."d".as_bytes(), false).unwrap();
         let values: Vec<_> = sub_iter.map(|doc| doc.get_body::<String>().unwrap()).collect();
-        assert_eq!(values.as_slice(), &keys[1..3]);
+        assert_eq!(&values[..], &keys[1..3]);
     }
 
     #[test]
@@ -1356,11 +1381,11 @@ mod tests {
         }
         assert!(db.commit(CommitOptions::Normal).is_ok());
 
-        let iter: Iterator<Doc> = store.seq_iter(FullRange, false).unwrap();
+        let iter: Iterator<Doc> = store.seq_iter(RangeFull, false).unwrap();
         let seq_nums: Vec<_> = iter.map(|doc| doc.seq_num()).collect();
         assert_eq!(seq_nums, (1..keys.len() + 1).map(|x| x as u64).collect::<Vec<_>>());
 
-        let start = 2us;
+        let start = 2usize;
         let end = 4;
         let sub_iter: Iterator<Doc> = store.seq_iter(start..end, false).unwrap();
 
@@ -1418,7 +1443,7 @@ mod tests {
         let doc2 = store.get_doc(Location::SeqNum(doc.seq_num())).unwrap();
         let v2: String = doc2.get_body().unwrap();
 
-        assert_eq!(v2.as_slice(), new_value);
+        assert_eq!(&v2, new_value);
     }
 
     #[test]
@@ -1441,7 +1466,7 @@ mod tests {
         let doc = snapshot.get_doc(Location::with_key(&key.as_bytes())).unwrap();
         let v2: String = doc.get_body().unwrap();
 
-        assert_eq!(v2.as_slice(), old_value);
+        assert_eq!(&v2, old_value);
     }
 
     #[test]
@@ -1467,6 +1492,6 @@ mod tests {
         let doc = store.get_doc(Location::with_key(&key.as_bytes())).unwrap();
         let v2: String = doc.get_body().unwrap();
 
-        assert_eq!(v2.as_slice(), old_value);
+        assert_eq!(&v2, old_value);
     }
 }
