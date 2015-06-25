@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="generator" content="rustdoc">
+    <meta name="description" content="API documentation for the Rust `KvHandle` struct in crate `sherwood`.">
+    <meta name="keywords" content="rust, rustlang, rust-lang, KvHandle">
+
+    <title>sherwood::KvHandle - Rust</title>
+
+    <link rel="stylesheet" type="text/css" href="../main.css">
+
+    
+    
+</head>
+<body class="rustdoc">
+    <!--[if lte IE 8]>
+    <div class="warning">
+        This old browser is unsupported and will most likely display funky
+        things.
+    </div>
+    <![endif]-->
+
+    
+
+    <section class="sidebar">
+        
+        <p class='location'><a href='index.html'>sherwood</a></p><script>window.sidebarCurrent = {name: 'KvHandle', ty: 'struct', relpath: ''};</script><script defer src="sidebar-items.js"></script>
+    </section>
+
+    <nav class="sub">
+        <form class="search-form js-only">
+            <div class="search-container">
+                <input class="search-input" name="search"
+                       autocomplete="off"
+                       placeholder="Click or press 'S' to search, '?' for more options..."
+                       type="search">
+            </div>
+        </form>
+    </nav>
+
+    <section id='main' class="content struct">
+<h1 class='fqn'><span class='in-band'>Struct <a href='index.html'>sherwood</a>::<wbr><a class='struct' href=''>KvHandle</a><wbr></span><span class='out-of-band'><span id='render-detail'>
+            <a id="collapse-all" href="#">[-]</a>&nbsp;<a id="expand-all" href="#">[+]</a>
+        </span><a id='src-2440' href='../src/sherwood/lib.rs.html#545-548'>[src]</a></span></h1>
+<pre class='rust struct'>pub struct KvHandle&lt;T&gt; {
+    // some fields omitted
+}</pre><div class='docblock'><p>ForestDB key value store</p>
+</div><h2 id='methods'>Methods</h2><h3 class='impl'><a class='stability Unmarked' title='No stability level'></a><code>impl&lt;Access&gt; <a class='struct' href='../sherwood/struct.KvHandle.html' title='sherwood::KvHandle'>KvHandle</a>&lt;Access&gt;</code></h3><div class='impl-items'><h4 id='method.get_value' class='method'><a class='stability Unmarked' title='No stability level'></a><code>fn <a href='#method.get_value' class='fnname'>get_value</a>&lt;K&gt;(&amp;self, key: &amp;K) -&gt; <a class='type' href='../sherwood/type.FdbResult.html' title='sherwood::FdbResult'>FdbResult</a>&lt;<a class='struct' href='http://doc.rust-lang.org/nightly/collections/vec/struct.Vec.html' title='collections::vec::Vec'>Vec</a>&lt;<a href='http://doc.rust-lang.org/nightly/std/primitive.u8.html'>u8</a>&gt;&gt; <span class='where'>where K: <a class='trait' href='http://doc.rust-lang.org/nightly/core/convert/trait.AsRef.html' title='core::convert::AsRef'>AsRef</a>&lt;<a href='http://doc.rust-lang.org/nightly/std/primitive.slice.html'>[<a href='http://doc.rust-lang.org/nightly/std/primitive.u8.html'>u8</a>]</a>&gt;</span></code></h4>
+<div class='docblock'><p>Sets a value for key (plain KV mode)</p>
+</div><h4 id='method.key_iter' class='method'><a class='stability Unmarked' title='No stability level'></a><code>fn <a href='#method.key_iter' class='fnname'>key_iter</a>&lt;T, U&gt;(&amp;self, range: T, skip_deleted: <a href='http://doc.rust-lang.org/nightly/std/primitive.bool.html'>bool</a>) -&gt; <a class='type' href='../sherwood/type.FdbResult.html' title='sherwood::FdbResult'>FdbResult</a>&lt;<a class='struct' href='../sherwood/struct.Iterator.html' title='sherwood::Iterator'>Iterator</a>&lt;U&gt;&gt; <span class='where'>where T: <a class='trait' href='../sherwood/trait.KeyRange.html' title='sherwood::KeyRange'>KeyRange</a></span></code></h4>
+<div class='docblock'><p>Creates a new iterator through key range</p>
+</div><h4 id='method.seq_iter' class='method'><a class='stability Unmarked' title='No stability level'></a><code>fn <a href='#method.seq_iter' class='fnname'>seq_iter</a>&lt;T, U&gt;(&amp;self, range: T, skip_deleted: <a href='http://doc.rust-lang.org/nightly/std/primitive.bool.html'>bool</a>) -&gt; <a class='type' href='../sherwood/type.FdbResult.html' title='sherwood::FdbResult'>FdbResult</a>&lt;<a class='struct' href='../sherwood/struct.Iterator.html' title='sherwood::Iterator'>Iterator</a>&lt;U&gt;&gt; <span class='where'>where T: <a class='trait' href='../sherwood/trait.SeqRange.html' title='sherwood::SeqRange'>SeqRange</a></span></code></h4>
+<div class='docblock'><p>Creates a new iterator through range of seq numbers</p>
+</div><h4 id='method.get_doc' class='method'><a class='stability Unmarked' title='No stability level'></a><code>fn <a href='#method.get_doc' class='fnname'>get_doc</a>&lt;'l&gt;(&amp;self, loc: <a class='enum' href='../sherwood/enum.Location.html' title='sherwood::Location'>Location</a>&lt;'l&gt;) -&gt; <a class='type' href='../sherwood/type.FdbResult.html' title='sherwood::FdbResult'>FdbResult</a>&lt;<a class='struct' href='../sherwood/struct.Doc.html' title='sherwood::Doc'>Doc</a>&gt;</code></h4>
+<div class='docblock'><p>Retrieves whole document specified by location</p>
+</div><h4 id='method.get_meta' class='method'><a class='stability Unmarked' title='No stability level'></a><code>fn <a href='#method.get_meta' class='fnname'>get_meta</a>&lt;'l&gt;(&amp;self, loc: <a class='enum' href='../sherwood/enum.Location.html' title='sherwood::Location'>Location</a>&lt;'l&gt;) -&gt; <a class='type' href='../sherwood/type.FdbResult.html' title='sherwood::FdbResult'>FdbResult</a>&lt;<a class='struct' href='../sherwood/struct.Meta.html' title='sherwood::Meta'>Meta</a>&gt;</code></h4>
+<div class='docblock'><p>Retrieves only meta data from document
+Note: it doesn&#39;t support retrieval through offset
+and will panic if corresponding location is used</p>
+</div><h4 id='method.seq_num' class='method'><a class='stability Unmarked' title='No stability level'></a><code>fn <a href='#method.seq_num' class='fnname'>seq_num</a>(&amp;self) -&gt; <a class='type' href='../sherwood/type.FdbResult.html' title='sherwood::FdbResult'>FdbResult</a>&lt;<a href='http://doc.rust-lang.org/nightly/std/primitive.u64.html'>u64</a>&gt;</code></h4>
+<div class='docblock'><p>Returns max seq number of current store</p>
+</div><h4 id='method.snapshot' class='method'><a class='stability Unmarked' title='No stability level'></a><code>fn <a href='#method.snapshot' class='fnname'>snapshot</a>(&amp;self, seq_num: <a href='http://doc.rust-lang.org/nightly/std/primitive.u64.html'>u64</a>) -&gt; <a class='type' href='../sherwood/type.FdbResult.html' title='sherwood::FdbResult'>FdbResult</a>&lt;<a class='struct' href='../sherwood/struct.KvHandle.html' title='sherwood::KvHandle'>KvHandle</a>&lt;ReadOnly&gt;&gt;</code></h4>
+<div class='docblock'><p>Creates a snapshot on specified seq_num</p>
+</div></div><h3 class='impl'><a class='stability Unmarked' title='No stability level'></a><code>impl <a class='struct' href='../sherwood/struct.KvHandle.html' title='sherwood::KvHandle'>KvHandle</a>&lt;ReadWrite&gt;</code></h3><div class='impl-items'><h4 id='method.set_value' class='method'><a class='stability Unmarked' title='No stability level'></a><code>fn <a href='#method.set_value' class='fnname'>set_value</a>&lt;K, V&gt;(&amp;self, key: &amp;K, value: &amp;V) -&gt; <a class='type' href='../sherwood/type.FdbResult.html' title='sherwood::FdbResult'>FdbResult</a>&lt;<a href='http://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>&gt; <span class='where'>where K: <a class='trait' href='http://doc.rust-lang.org/nightly/core/convert/trait.AsRef.html' title='core::convert::AsRef'>AsRef</a>&lt;<a href='http://doc.rust-lang.org/nightly/std/primitive.slice.html'>[<a href='http://doc.rust-lang.org/nightly/std/primitive.u8.html'>u8</a>]</a>&gt;, V: <a class='trait' href='http://doc.rust-lang.org/nightly/core/convert/trait.AsRef.html' title='core::convert::AsRef'>AsRef</a>&lt;<a href='http://doc.rust-lang.org/nightly/std/primitive.slice.html'>[<a href='http://doc.rust-lang.org/nightly/std/primitive.u8.html'>u8</a>]</a>&gt;</span></code></h4>
+<div class='docblock'><p>Retrieves a value by key (plain KV mode)</p>
+</div><h4 id='method.del_value' class='method'><a class='stability Unmarked' title='No stability level'></a><code>fn <a href='#method.del_value' class='fnname'>del_value</a>&lt;K&gt;(&amp;self, key: &amp;K) -&gt; <a class='type' href='../sherwood/type.FdbResult.html' title='sherwood::FdbResult'>FdbResult</a>&lt;<a href='http://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>&gt; <span class='where'>where K: <a class='trait' href='http://doc.rust-lang.org/nightly/core/convert/trait.AsRef.html' title='core::convert::AsRef'>AsRef</a>&lt;<a href='http://doc.rust-lang.org/nightly/std/primitive.slice.html'>[<a href='http://doc.rust-lang.org/nightly/std/primitive.u8.html'>u8</a>]</a>&gt;</span></code></h4>
+<div class='docblock'><p>Deletes a value by key (plain KV mode)</p>
+</div><h4 id='method.set_doc' class='method'><a class='stability Unmarked' title='No stability level'></a><code>fn <a href='#method.set_doc' class='fnname'>set_doc</a>(&amp;self, doc: &amp;<a class='struct' href='../sherwood/struct.Doc.html' title='sherwood::Doc'>Doc</a>) -&gt; <a class='type' href='../sherwood/type.FdbResult.html' title='sherwood::FdbResult'>FdbResult</a>&lt;<a href='http://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>&gt;</code></h4>
+<div class='docblock'><p>Sets the document</p>
+</div><h4 id='method.del_doc' class='method'><a class='stability Unmarked' title='No stability level'></a><code>fn <a href='#method.del_doc' class='fnname'>del_doc</a>(&amp;self, doc: &amp;<a class='struct' href='../sherwood/struct.Doc.html' title='sherwood::Doc'>Doc</a>) -&gt; <a class='type' href='../sherwood/type.FdbResult.html' title='sherwood::FdbResult'>FdbResult</a>&lt;<a href='http://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>&gt;</code></h4>
+<div class='docblock'><p>Deletes the document</p>
+
+<p>It&#39;s equivalent to</p>
+<pre id='rust-example-rendered' class='rust '>
+<span class='ident'>doc</span>.<span class='ident'>deleted</span> <span class='op'>=</span> <span class='number'>1</span>;
+<span class='ident'>store</span>.<span class='ident'>set</span>(<span class='ident'>doc</span>)
+</pre>
+</div><h4 id='method.del_meta' class='method'><a class='stability Unmarked' title='No stability level'></a><code>fn <a href='#method.del_meta' class='fnname'>del_meta</a>(&amp;self, meta: &amp;<a class='struct' href='../sherwood/struct.Meta.html' title='sherwood::Meta'>Meta</a>) -&gt; <a class='type' href='../sherwood/type.FdbResult.html' title='sherwood::FdbResult'>FdbResult</a>&lt;<a href='http://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>&gt;</code></h4>
+<div class='docblock'><p>Deletes the document specified by available meta</p>
+</div><h4 id='method.rollback' class='method'><a class='stability Unmarked' title='No stability level'></a><code>fn <a href='#method.rollback' class='fnname'>rollback</a>(&amp;self, seq_num: <a href='http://doc.rust-lang.org/nightly/std/primitive.u64.html'>u64</a>) -&gt; <a class='type' href='../sherwood/type.FdbResult.html' title='sherwood::FdbResult'>FdbResult</a>&lt;<a href='http://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>&gt;</code></h4>
+<div class='docblock'><p>Rollbacks kv handle to specified seq num</p>
+</div><h4 id='method.clear' class='method'><a class='stability Unmarked' title='No stability level'></a><code>fn <a href='#method.clear' class='fnname'>clear</a>(&amp;self) -&gt; <a class='type' href='../sherwood/type.FdbResult.html' title='sherwood::FdbResult'>FdbResult</a>&lt;<a href='http://doc.rust-lang.org/nightly/std/primitive.tuple.html'>()</a>&gt;</code></h4>
+<div class='docblock'><p>Clears KV store, i.e. deletes all docs</p>
+</div></div><h2 id='implementations'>Trait Implementations</h2><h3 class='impl'><a class='stability Stable' title='Stable'></a><code>impl&lt;T&gt; <a class='trait' href='http://doc.rust-lang.org/nightly/core/clone/trait.Clone.html' title='core::clone::Clone'>Clone</a> for <a class='struct' href='../sherwood/struct.KvHandle.html' title='sherwood::KvHandle'>KvHandle</a>&lt;T&gt;</code></h3><div class='impl-items'><h4 id='method.clone' class='method'><a class='stability Stable' title='Stable'></a><code>fn <a href='http://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#method.clone' class='fnname'>clone</a>(&amp;self) -&gt; <a class='struct' href='../sherwood/struct.KvHandle.html' title='sherwood::KvHandle'>KvHandle</a>&lt;T&gt;</code></h4>
+<h4 id='method.clone_from' class='method'><a class='stability Stable' title='Stable'></a><code>fn <a href='http://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#method.clone_from' class='fnname'>clone_from</a>(&amp;mut self, source: &amp;Self)</code></h4>
+</div></section>
+    <section id='search' class="content hidden"></section>
+
+    <section class="footer"></section>
+
+    <div id="help" class="hidden">
+        <div class="shortcuts">
+            <h1>Keyboard shortcuts</h1>
+            <dl>
+                <dt>?</dt>
+                <dd>Show this help dialog</dd>
+                <dt>S</dt>
+                <dd>Focus the search field</dd>
+                <dt>&larrb;</dt>
+                <dd>Move up in search results</dd>
+                <dt>&rarrb;</dt>
+                <dd>Move down in search results</dd>
+                <dt>&#9166;</dt>
+                <dd>Go to active search result</dd>
+            </dl>
+        </div>
+        <div class="infos">
+            <h1>Search tricks</h1>
+            <p>
+                Prefix searches with a type followed by a colon (e.g.
+                <code>fn:</code>) to restrict the search to a given type.
+            </p>
+            <p>
+                Accepted types are: <code>fn</code>, <code>mod</code>,
+                <code>struct</code>, <code>enum</code>,
+                <code>trait</code>, <code>typedef</code> (or
+                <code>tdef</code>).
+            </p>
+        </div>
+    </div>
+
+    
+
+    <script>
+        window.rootPath = "../";
+        window.currentCrate = "sherwood";
+        window.playgroundUrl = "";
+    </script>
+    <script src="../jquery.js"></script>
+    <script src="../main.js"></script>
+    
+    <script async src="../search-index.js"></script>
+</body>
+</html>
